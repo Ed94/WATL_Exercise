@@ -1,4 +1,8 @@
-$devshell = join-path $PSScriptRoot 'devshell.ps1'
+$misc = Join-Path $PSScriptRoot 'helpers/misc.psm1'
+import-module $misc
+
+$devshell  = join-path $PSScriptRoot 'helpers/devshell.ps1'
+$path_root = Get-ScriptRepoRoot
 
 if ($IsWindows) {
 	& $devshell -arch amd64
@@ -60,7 +64,7 @@ $archiver = 'lib'
 $compiler = 'cl'
 $linker   = 'link'
 
-$path_build = join-path $PSScriptRoot 'build'
+$path_build = join-path $path_root 'build'
 if ( -not(test-path -Path $path_build) ) {
 	new-item -ItemType Directory -Path $path_build
 }
@@ -101,14 +105,14 @@ $compiler_args += ( $flag_path_debug + $path_build + '\' )
 $compiler_args += $flag_link_win_rt_static_debug
 
 # Include setup
-$compiler_args += ($flag_include + $PSScriptRoot)
+$compiler_args += ($flag_include + $path_root)
 
 # Specify unit to compile
-$unit           = join-path $PSScriptRoot 'watl.v0.msvc.c'
+$unit           = join-path $path_root 'C\watl.v0.msvc.c'
 $compiler_args += $flag_compile, $unit
 
 # Diagnoistc print for the args
-# $compiler_args | ForEach-Object { Write-Host $_ }
+$compiler_args | ForEach-Object { Write-Host $_ }
 write-host
 
 # $compiler_args += ( $flag_define + 'DEMO_STR_SLICE' )
@@ -137,7 +141,7 @@ if ($true) {
 	$linker_args += $object
 
 	# Diagnoistc print for the args
-	# $linker_args | ForEach-Object { Write-Host $_ }
+	$linker_args | ForEach-Object { Write-Host $_ }
 	write-host
 
 	& $linker $linker_args

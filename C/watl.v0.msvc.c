@@ -5,34 +5,6 @@ Version: 0 (AS INTENDED)
 Vendor OS & Compiler: Windows 11, MSVC
 */
 
-#pragma region Debug
-
-#if !defined(BUILD_DEBUG)
-#define debug_trap()
-#define assert(cond)
-#define assert_msg(cond, msg, ...)
-#endif
-
-#if defined(BUILD_DEBUG)
-#define debug_trap() __debugbreak()
-
-#define assert(cond) assert_msg(cond, nullptr)
-#define assert_msg(cond, msg, ...)                                                                                   \
-do                                                                                                                   \
-{                                                                                                                    \
-	if (! (cond))                                                                                                    \
-	{                                                                                                                \
-		assert_handler(lit(stringify(cond)), lit(__FILE__), lit(__func__), cast(S64, __LINE__), msg, ##__VA_ARGS__); \
-		debug_trap();                                                                                                \
-	}                                                                                                                \
-}                                                                                                                    \
-while(0)
-#endif
-
-void assert_handler(Str8 condition, Str8 path_file, Str8 function, S64 line, message, ...);
-
-#pragma endregion Debug
-
 #pragma region C Things
 
 #define cast(type, data)  ((type)(data))
@@ -40,8 +12,8 @@ void assert_handler(Str8 condition, Str8 path_file, Str8 function, S64 line, mes
 
 #define nullptr cast(void*, 0)
 
-#define glue_impl(A, B) A ## B
-#define glue(A, B)      glue_impl(A, B)
+// #define glue_impl(A, B) A ## B
+// #define glue(A, B)      glue_impl(A, B)
 
 // Enforces size querying uses SSIZE type.
 #define size_of(data) cast(SSIZE, sizeof(data))
@@ -81,30 +53,12 @@ typedef S8  B8;
 typedef S16 B16;
 typedef S32 B32;
 
-#pragma region C Things
+#pragma endregion C Things
 
 #pragma region Memory Operations
 
-inline
-void* memory_copy(void* restrict dest, void const* restrict src, USIZE length)
-{
-	if (dest == nullptr || src == nullptr || length == 0) {
-		return nullptr;
-	}
-	// https://learn.microsoft.com/en-us/cpp/intrinsics/movsb?view=msvc-170
-	__movsb((unsigned char*)dest, (const unsigned char*)src, length);
-	return dest;
-}
-
-inline 
-B32 memory_zero(void* dest, USIZE length)
-{
-	if (dest == nullptr || length <= 0) {
-		return false;
-	}
-	__stosb((unsigned char*)dest, 0, length);
-	return true;
-}
+void* memory_copy(void* restrict dest, void const* restrict src, USIZE length);
+B32   memory_zero(void* dest, USIZE length);
 
 typedef struct Slice_Byte Slice_Byte;
 struct Slice_Byte {
@@ -117,14 +71,7 @@ struct Slice_Byte {
 	assert(slice.len > 0);        \
 } while(0)
 
-inline
-void slice__copy(Slice_Byte dest, SSIZE dest_typewidth, Slice_Byte src, SSIZE src_typewidth) {
-	assert(dest.len >= src.len);
-	slice_assert(dest);
-	slice_assert(src);
-	memory_copy(dest.ptr, src.ptr, src.len);
-}
-
+void slice__copy(Slice_Byte dest, SSIZE dest_typewidth, Slice_Byte src, SSIZE src_typewidth);
 #define slice_copy(dest, src) slice__copy(                                            \
 	(Slice_Byte){(dest).ptr, (dest).len * size_of(*(dest).ptr)}, size_of(*(dest).ptr) \
 ,	(Slice_Byte){(src ).ptr, (src ).len * size_of(*(src ).ptr)}, size_of(*(src ).ptr) \
@@ -135,15 +82,15 @@ void slice__copy(Slice_Byte dest, SSIZE dest_typewidth, Slice_Byte src, SSIZE sr
 #pragma region Allocator Interface
 
 typedef U32 AllocatorOp; enum {
-	Alloc,
-	Alloc_NoZero, // If Alloc exist, so must No_Zero
-	Free,
-	Reset,
-	Resize,
-	Resize_NoZero,
-	Rewind,
-	SavePoint,
-	Query, // Must always be implemented
+	AllocatorOp_Alloc = 0,
+	AllocatorOp_Alloc_NoZero, // If Alloc exist, so must No_Zero
+	AllocatorOp_Free,
+	AllocatorOp_Reset,
+	AllocatorOp_Resize,
+	AllocatorOp_Resize_NoZero,
+	AllocatorOp_Rewind,
+	AllocatorOp_SavePoint,
+	AllocatorOp_Query, // Must always be implemented
 };
 
 /*
@@ -185,8 +132,8 @@ typedef void (AllocatorProc) (AllocatorOpData In, AllocatorOpData* Out);
 
 typedef struct AllocatorInfo AllocatorInfo;
 struct AllocatorInfo {
-	AllocatorProc proc;
-	void*         data;
+	AllocatorProc* proc;
+	void*          data;
 };
 
 // This the point right after the last allocation usually.
@@ -203,14 +150,14 @@ Slice_Byte  mem_alloc          (AllocatorInfo ainfo, SSIZE size);
 Slice_Byte  mem_alloc_nz       (AllocatorInfo ainfo, SSIZE size);
 Slice_Byte  mem_alloc_align    (AllocatorInfo ainfo, SSIZE size);
 Slice_Byte  mem_alloc_align_nz (AllocatorInfo ainfo, SSIZE size);
-void        mem_free           (AllocatorInfo ainfo, SliceByte mem);
+void        mem_free           (AllocatorInfo ainfo, Slice_Byte mem);
 void        mem_reset          (AllocatorInfo ainfo);
-Slice_Byte  mem_grow           (AllocatorInfo ainfo, SliceByte mem, SSIZE size);
-Slice_Byte  mem_shrink         (AllocatorInfo ainfo, SliceByte mem, SSIZE size);
-Slice_Byte  mem_resize         (AllocatorInfo ainfo, SliceByte mem, SSIZE desired_size);
-Slice_Byte  mem_resize_nz      (AllocatorInfo ainfo, SliceByte mem, SSIZE desired_size);
-Slice_Byte  mem_resize_align   (AllocatorInfo ainfo, SliceByte mem, SSIZE desired_size, SSIZE alignment);
-Slice_Byte  mem_resize_align_nz(AllocatorInfo ainfo, SliceByte mem, SSIZE desired_size, SSIZE alignment);
+Slice_Byte  mem_grow           (AllocatorInfo ainfo, Slice_Byte mem, SSIZE size);
+Slice_Byte  mem_shrink         (AllocatorInfo ainfo, Slice_Byte mem, SSIZE size);
+Slice_Byte  mem_resize         (AllocatorInfo ainfo, Slice_Byte mem, SSIZE desired_size);
+Slice_Byte  mem_resize_nz      (AllocatorInfo ainfo, Slice_Byte mem, SSIZE desired_size);
+Slice_Byte  mem_resize_align   (AllocatorInfo ainfo, Slice_Byte mem, SSIZE desired_size, SSIZE alignment);
+Slice_Byte  mem_resize_align_nz(AllocatorInfo ainfo, Slice_Byte mem, SSIZE desired_size, SSIZE alignment);
 void        mem_rewind         (AllocatorInfo ainfo, AllocatorSP save_point);
 AllocatorSP mem_save_point     (AllocatorInfo ainfo);
 
@@ -225,6 +172,8 @@ struct Str8 {
 	SSIZE len;
 };
 #define lit(string_literal) (Str8){ string_literal, size_of(string_literal) - 1 }
+
+
 
 typedef struct Str8Cache_Slot Str8Cache_Slot;
 struct Str8Cache_Slot {
@@ -250,21 +199,48 @@ struct Str8Cache {
 void      str8cache_init(Str8Cache* cache, AllocatorInfo ainfo_str, AllocatorInfo ainfo_slots);
 Str8Cache str8cache_make(                  AllocatorInfo ainfo_str, AllocatorInfo ainfo_slots);
 
-
-
 #pragma endregion Strings
+
+#pragma region Debug
+
+#if !defined(BUILD_DEBUG)
+#define debug_trap()
+#define assert(cond)
+#define assert_msg(cond, msg, ...)
+#endif
+
+#if defined(BUILD_DEBUG)
+#define debug_trap() __debugbreak()
+
+#define assert(cond) assert_msg(cond, nullptr)
+#define assert_msg(cond, msg, ...)                                                                                   \
+do                                                                                                                   \
+{                                                                                                                    \
+	if (! (cond))                                                                                                    \
+	{                                                                                                                \
+		assert_handler(lit(stringify(cond)), lit(__FILE__), lit(__func__), cast(S64, __LINE__), msg, ##__VA_ARGS__); \
+		debug_trap();                                                                                                \
+	}                                                                                                                \
+}                                                                                                                    \
+while(0)
+#endif
+
+void assert_handler(Str8 condition, Str8 path_file, Str8 function, S64 line, Str8 message, ...);
+
+#pragma endregion Debug
 
 #pragma region File System
 
-typedef struct FileOpInfo;
+typedef struct FileOpInfo FileOpInfo;
 struct FileOpInfo {
 	Slice_Byte content;
 };
 
+typedef struct Opts_read_file_contents Opts_read_file_contents;
 struct Opts_read_file_contents {
 	AllocatorInfo backing;
 	B32           zero_backing;
-}
+};
 
 void file_read_contents_api(FileOpInfo* result, Str8 path, Opts_read_file_contents opts);
 void file_write_str8       (Str8 path, Str8 content);
@@ -336,6 +312,43 @@ void watl_lex_api(WATL_LexInfo* info, Str8 source, Opts_watl_lex* opts);
 #pragma endregion WATL
 
 #pragma region Implementation
+
+#pragma region Memory Operations
+
+inline
+void* memory_copy(void* restrict dest, void const* restrict src, USIZE length)
+{
+	if (dest == nullptr || src == nullptr || length == 0) {
+		return nullptr;
+	}
+	// https://learn.microsoft.com/en-us/cpp/intrinsics/movsb?view=msvc-170
+	memcpy((unsigned char*)dest, (const unsigned char*)src, length);
+	return dest;
+}
+
+inline 
+B32 memory_zero(void* dest, USIZE length)
+{
+	if (dest == nullptr || length <= 0) {
+		return false;
+	}
+	memset((unsigned char*)dest, 0, length);
+	return true;
+}
+
+inline
+void slice__copy(Slice_Byte dest, SSIZE dest_typewidth, Slice_Byte src, SSIZE src_typewidth) {
+	assert(dest.len >= src.len);
+	slice_assert(dest);
+	slice_assert(src);
+	memory_copy(dest.ptr, src.ptr, src.len);
+}
+
+#pragma endregion Memory Operations
+
+#pragma region Allocator Interface
+
+#pragma endregion Allocator Interface
 
 #pragma region File System
 
@@ -451,5 +464,13 @@ file_read_contents_api(FileOpInfo* result, Str8* path, Opts__read_file_contents*
 }
 
 #pragma endregion File System
+
+#pragma region Debug
+
+void assert_handler(Str8 condition, Str8 path_file, Str8 function, Str8 line, Str8 message, ...) {
+
+}
+
+#pragma endregion Debug
 
 #pragma endregion Implementation
