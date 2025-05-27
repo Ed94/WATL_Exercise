@@ -147,7 +147,7 @@ The actual macro uses farray helper macros:
 ```c
 #define slice_arg_from_array(type, ...) & (tmpl(Slice,type)) {  \
 	.ptr = farray_init(type, __VA_ARGS__),                      \
-	.len = farray_len( farray_init(type, __VA_ARGS__)           \
+	.len = farray_len( farray_init(type, __VA_ARGS__))          \
 }
 ```
 
