@@ -12,6 +12,6 @@ start:
     str_cache     := str.cache.init()
     lines         := watl.parse(tokens)
     listing       := watl.dump_listing(lines)
-    file.write_str(str_fmt("<name>.listing.source", self.source.name))
+    file.write_str(str.fmt("<name>.listing.source", self.source.name))
 end
 ```
