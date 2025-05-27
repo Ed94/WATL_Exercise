@@ -104,7 +104,10 @@ typedef def_Slice(Byte);
 void slice__copy(Slice_Byte dest, SSIZE dest_typewidth, Slice_Byte src, SSIZE src_typewidth);
 #define slice_copy(dest, src) slice__copy( slice_byte(dest), size_of_slice_type(dest), slice_byte(src), size_of_slice_type(src))
 
-#define slice_iter(container, iter) typeof((container).ptr) iter = (container).ptr; iter != ((container).ptr + (container).len); ++ iter
+#define slice_iter(container, iter)                 \
+	typeof((container).ptr) iter = (container).ptr; \
+	iter != ((container).ptr + (container).len);    \
+	++ iter
 
 #define slice_arg_from_array(type, ...) & (tmpl(Slice,type)) {  \
 	.ptr = farray_init(type, __VA_ARGS__),                      \
