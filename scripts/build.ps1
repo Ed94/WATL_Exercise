@@ -53,6 +53,7 @@ $flag_path_interm                  = '/Fo'
 $flag_path_debug                   = '/Fd'
 $flag_path_output                  = '/Fe'
 $flag_preprocess_conform           = '/Zc:preprocessor'
+$flag_sanitize_address             = '/fsanitize=address'
 $flag_updated_cpp_macro            = "/Zc:__cplusplus"
 $flag_set_stack_size               = '/F'
 $flag_syntax_only                  = '/Zs'
@@ -81,6 +82,7 @@ $compiler_args += $flag_c11
 $compiler_args += $flag_exceptions_disabled
 $compiler_args += $flag_RTTI_disabled
 $compiler_args += $flag_preprocess_conform
+$compiler_args += $flag_sanitize_address
 
 # Set charset encoding for both execution and source to UTF-8
 
