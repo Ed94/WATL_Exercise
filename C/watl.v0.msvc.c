@@ -123,35 +123,35 @@ def_struct(tmpl(Slice,type)) { \
 	type* ptr;                 \
 	SSIZE len;                 \
 }
+#define slice_assert(slice) do { assert((slice).ptr != nullptr); assert((slice).len > 0); } while(0)
+#define slice_end(slice)          ((slice).ptr + (slice).len)
+#define size_of_slice_type(slice) size_of( * (slice).ptr )
 
 typedef def_Slice(void);
 typedef def_Slice(Byte);
-
-#define slice_fmem(mem) (Slice_Byte){ mem, size_of(mem) }
-
-#define slice_assert(slice) do { assert((slice).ptr != nullptr); assert((slice).len > 0); } while(0)
-
-#define slice_byte(slice)         (Slice_Byte){cast(Byte*, (slice).ptr), (slice).len * size_of_slice_type(slice)}
-#define size_of_slice_type(slice) size_of( * (slice).ptr )
+#define slice_byte(slice)   (Slice_Byte){cast(Byte*, (slice).ptr), (slice).len * size_of_slice_type(slice)}
+#define slice_fmem(mem)     (Slice_Byte){ mem, size_of(mem) }
 
 void slice__copy(Slice_Byte dest, SSIZE dest_typewidth, Slice_Byte src, SSIZE src_typewidth);
 void slice__zero(Slice_Byte mem, SSIZE typewidth);
-
 #define slice_copy(dest, src) slice__copy(slice_byte(dest),  size_of_slice_type(dest), slice_byte(src), size_of_slice_type(src))
 #define slice_zero(slice)     slice__zero(slice_byte(slice), size_of_slice_type(slice))
-
-#define slice_end(slice) ((slice).ptr + (slice).len)
-
 #define slice_iter(container, iter)                 \
 	typeof((container).ptr) iter = (container).ptr; \
 	iter != slice_end(container);                   \
 	++ iter
-
 #define slice_arg_from_array(type, ...) & (tmpl(Slice,type)) {  \
 	.ptr = farray_init(type, __VA_ARGS__),                      \
 	.len = farray_len( farray_init(type, __VA_ARGS__))          \
 }
+
+#define sll_stack_push_n(f, n, next) do { (n)->next = (f); (f) = (n); } while(0)
 #pragma endregion Memory
+
+#pragma region Math
+#define min(A, B) (((A) < (B)) ? (A) : (B))
+#define max(A, B) (((A) > (B)) ? (A) : (B))
+#pragma endregion Math
 
 #pragma region Strings
 typedef unsigned char UTF8;
@@ -256,7 +256,7 @@ void        farena_rewind(FArena* arena, AllocatorSP save_point);
 AllocatorSP farena_save  (FArena  arena);
 
 void farena_allocator_proc(AllocatorProc_In in, AllocatorProc_Out* out);
-#define farena_allocator(arena) (AllocatorInfo){ farena_allocator_proc, & arena }
+#define ainfo_farena(arena) (AllocatorInfo){ .proc = farena_allocator_proc, .data = & arena }
 
 #define farena_push(arena, type, ...) \
 cast(type*, farena__push(arena, size_of(type), 1, opt_args(Opts_farena_push, lit(stringify(type)), __VA_ARGS__))).ptr
@@ -269,17 +269,24 @@ cast(type*, farena__push(arena, size_of(type), 1, opt_args(Opts_farena_push, lit
 typedef def_struct(OS_SystemInfo) {
 	SSIZE target_page_size;
 };
+typedef def_struct(Opts_vmem) {
+	void* base_addr;
+	B32   no_large_pages;
+};
 void os_init();
 OS_SystemInfo* os_system_info();
+
+inline B32  os__vmem_commit(void* vm, SSIZE size, Opts_vmem* opts);
+inline void os_vmem_release(void* vm, SSIZE size);
+
+#define os_vmem_reserve(size, ...)    os__vmem_reserve(size, opt_args(Opts_vmem, __VA_ARGS__))
+#define os_vmem_commit(vm, size, ...) os__vmem_commit(vm, size, opt_args(Opts_vmem, __VA_ARGS__))
 #pragma endregion OS
 
 #pragma region VArena (Virutal Address Space Arena)
-typedef def_struct(Opts_varena) {
-	Str8  type_name;
-	SSIZE alignment;
-};
+typedef Opts_farena Opts_varena;
 typedef def_enum(U32, VArenaFlags) { 
-	VArenaFlag_Placeholder,
+	VArenaFlag_NoLargePages = (1 << 0),
 };
 typedef def_struct(VArena) {
 	SSIZE reserve_start;
@@ -298,20 +305,53 @@ typedef def_struct(Opts_varena_make) {
 VArena* varena__make(Opts_varena_make* opts);
 #define varena_make(...) varena__make(opt_args(Opts_varena_make, __VA_ARGS__))
 
-void        varena_commit (VArena* arena, SSIZE commit_size);
 Slice_Byte  varena__push  (VArena* arena, SSIZE amount, SSIZE type_width, Opts_varena* opts);
 void        varena_release(VArena* arena);
-void        varnea_rewind (VArena* arena, AllocatorSP save_point);
-AllocatorSP varnea_save   (VArena* arena);
+void        varena_rewind (VArena* arena, AllocatorSP save_point);
+AllocatorSP varnea_save   (VArena  arena);
 
-void varena_allocator_proc(AllocatorProc_In in, AllocatorProc_Out* out);
+void varena_allocator_proc(AllocatorProc_In in, AllocatorProc_Out* out); 
+#define ainfo_varena(varena) (AllocatorInfo) { .proc = varena_allocator_proc, .data = varena }
 
 #define varena_push(arena, type, ...) \
 cast(type*, varena__push(arena, 1, size_of(type), opt_args(Opts_varena, lit(stringify(type)), __VA_ARGS__) ).ptr)
 
 #define varena_push_array(arena, type, amount, ...) \
-(Slice ## type){ varena__push(arena, size_of(type), amount, opt_args(Opts_varena, lit(stringify(type)), __VA_ARGS__)).ptr, amount }
+(tmpl(Slice,type)){ varena__push(arena, size_of(type), amount, opt_args(Opts_varena, lit(stringify(type)), __VA_ARGS__)).ptr, amount }
 #pragma endregion VArnea
+
+#pragma region Arena (Casey-Ryan Composite Arenas)
+typedef Opts_varena Opts_arena;
+typedef def_enum(U32, ArenaFlags) {
+	ArenaFlag_NoLargePages = (1 << 0),
+	ArenaFlag_NoChain      = (1 << 1),
+};
+typedef def_struct(Arena) {
+	VArena*    backing;
+	Arena*     prev;
+	Arena*     current;
+	SSIZE      base_pos;
+	SSIZE      pos;
+	ArenaFlags flags;
+};
+typedef Opts_varena_make Opts_arena_make;
+Arena*      arena__make  (Opts_arena_make* opts);
+Slice_Byte  arena__push  (Arena* arena, SSIZE amount, SSIZE type_width, Opts_arena* opts);
+void        arena_release(Arena* arena);
+void        arena_rewind (Arena* arena, AllocatorSP save_point);
+AllocatorSP arena_save   (Arena* arena);
+
+void arena_allocator_proc(AllocatorProc_In in, AllocatorProc_Out* out);
+#define ainfo_arena(arena) (AllocatorInfo){ .proc = arena_allocator_proc, .data = arena }
+
+#define arena_make(...) arena__make(opt_args(Opts_arena_make, __VA_ARGS__))
+
+#define arena_push(arena, type, ...) \
+cast(type*, arena__push(arena, 1, size_of(type), opt_args(Opts_arena, lit(stringify(type)), __VA_ARGS__) ).ptr)
+
+#define arena_push_array(arena, type, amount, ...) \
+(tmpl(Slice,type)){ arena__push(arena, size_of(type), amount, opt_args(Opts_arena, lit(stringify(type)), __VA_ARGS__)).ptr, amount }
+#pragma endregion Arena
 
 #pragma region Hashing
 void hash64_djb8(U64* hash, Slice_Byte bytes) {
@@ -837,6 +877,7 @@ __declspec(dllimport) USIZE     __stdcall GetLargePageMinimum(void);
 __declspec(dllimport) MS_BOOL   __stdcall LookupPrivilegeValueW(MS_LPWSTR lpSystemName, MS_LPWSTR lpName, MS_PLUID lpLuid);
 __declspec(dllimport) MS_BOOL   __stdcall OpenProcessToken(MS_HANDLE ProcessHandle, MS_DWORD DesiredAccess, MS_PHANDLE TokenHandle);
 __declspec(dllimport) MS_LPVOID __stdcall VirtualAlloc(MS_LPVOID lpAddress, USIZE dwSize, MS_DWORD flAllocationType, MS_DWORD flProtect);
+__declspec(dllimport) MS_BOOL   __stdcall VirtualFree (MS_LPVOID lpAddress, USIZE dwSize, MS_DWORD dwFreeType);
 
 typedef def_struct(OS_Windows_State) {
 	OS_SystemInfo system_info;
@@ -862,22 +903,40 @@ void os__enable_large_pages() {
 		CloseHandle(token);
 	}
 }
+inline
 void os_init() {
 	os__enable_large_pages();
 	OS_SystemInfo* info = & os__windows_info.system_info;
 	info->target_page_size = (SSIZE)GetLargePageMinimum();
 }
-void* os_reserve(SSIZE size) { void* result = VirtualAlloc(0, size, MS_MEM_RESERVE|MS_MEM_COMMIT|MS_MEM_LARGE_PAGES, MS_PAGE_READWRITE); return result; }
+inline void* os__vmem_reserve(SSIZE size, Opts_vmem* opts) { 
+	assert(opts != nullptr);
+	void* result = VirtualAlloc(opts->base_addr, size
+		,	MS_MEM_RESERVE|MS_MEM_COMMIT|(opts->no_large_pages == false ? MS_MEM_LARGE_PAGES : 0)
+		,	MS_PAGE_READWRITE
+	); 
+	return result; 
+}
+inline B32 os__vmem_commit(void* vm, SSIZE size, Opts_vmem* opts) { 
+	assert(opts != nullptr);
+	if (opts->no_large_pages == false ) { return 1; }
+	B32 result = (VirtualAlloc(vm, size, MS_MEM_COMMIT, MS_PAGE_READWRITE) != 0); 
+	return result;
+}
+inline void  os_vmem_release(void* vm, SSIZE size) { VirtualFree(vm, 0, MS_MEM_RESERVE); }
 #pragma endregion OS
 
 #pragma region VArena (Virutal Address Space Arena)
 VArena* varena__make(Opts_varena_make* opts) {
+	assert(opts != nullptr);
 	if (opts->reserve_size == 0) { opts->reserve_size = mega(64); }
 	if (opts->commit_size  == 0) { opts->commit_size = mega(64); }
-	SSIZE reserve_size = align_pow2(opts->reserve_size, os_system_info()->target_page_size);
-	SSIZE commit_size  = align_pow2(opts->commit_size,  os_system_info()->target_page_size);
-	Byte* base         = os_reserve(reserve_size); os_commit(base, commit_size);
+	SSIZE reserve_size   = align_pow2(opts->reserve_size, os_system_info()->target_page_size);
+	SSIZE commit_size    = align_pow2(opts->commit_size,  os_system_info()->target_page_size);
+	B32   no_large_pages = (opts->flags & VArenaFlag_NoLargePages) != 0;
+	Byte* base           = os_vmem_reserve(opts->base_addr, reserve_size, .no_large_pages = no_large_pages);
 	assert(base != nullptr);
+	os_vmem_commit(base, commit_size, .no_large_pages = no_large_pages);
 	SSIZE header_size = align_pow2(size_of(VArena), MEMORY_ALIGNMENT_DEFAULT);
 	VArena* vm = cast(VArena*, base);
 	* vm = (VArena){
@@ -890,21 +949,154 @@ VArena* varena__make(Opts_varena_make* opts) {
 	};
 	return vm;
 }
-Slice_Byte varena__push(VArena* vm, SSIZE amount, SSIZE type_width, Opts_varena* opts)
-{
+Slice_Byte varena__push(VArena* vm, SSIZE amount, SSIZE type_width, Opts_varena* opts) {
 	assert(amount != 0);
 	SSIZE alignment      = opts->alignment ? opts->alignment : MEMORY_ALIGNMENT_DEFAULT;
 	SSIZE requested_size = amount * type_width; 
 	SSIZE aligned_size   = align_pow2(requested_size, alignment);
-
 	SSIZE current_offset = vm->reserve_start + vm->commit_used;
 	SSIZE to_be_used     = vm->commit_used   + aligned_size;
 	SSIZE reserve_left   = vm->reserve       - vm->committed;
 	assert(to_be_used < reserve_left);
-	
-	return {};
+	SSIZE header_offset  = vm->reserve_start - cast(SSIZE, vm);
+	SSIZE commit_left    = vm->committed - vm->commit_used - header_offset;
+	B32   exhausted      = commit_left < to_be_used;
+	if (exhausted)
+	{
+		SSIZE next_commit_size = reserve_left > 0 ? max(vm->commit_size, to_be_used) : cast(SSIZE, align_pow2( abs(reserve_left), os_system_info()->target_page_size));
+		if (next_commit_size) {
+			Byte* next_commit_start = cast(Byte*, cast(SSIZE, vm) + vm->committed);
+			B32   no_large_pages    = (vm->flags & VArenaFlag_NoLargePages) != 0;
+			B32   commit_result     = os_vmem_commit(next_commit_start, next_commit_size);
+			if (commit_result == false) {
+				return (Slice_Byte){0};
+			}
+			vm->committed += next_commit_size;
+		}
+	}
+	return (Slice_Byte){.ptr = cast(Byte*, current_offset), .len = requested_size};
+}
+inline void        varena_release(VArena* arena)               { os_vmem_release(arena, arena->reserve); }
+inline void        varena_rewind  (VArena* vm, AllocatorSP sp) { assert(vm != nullptr); vm->commit_used = sp.slot; }
+inline AllocatorSP varena_save(VArena vm)                      { return (AllocatorSP){vm.commit_used}; }         
+void varena__allocator_proc(AllocatorProc_In in, AllocatorProc_Out* out)
+{
+	VArena* vm = cast(VArena*, in.data);
+	switch (in.op)
+	{
+		case AllocatorOp_Alloc_NoZero:
+			out->allocation = varena_push_array(vm, Byte, in.requested_size);
+		break;
+		case AllocatorOp_Alloc:
+			out->allocation = varena_push_array(vm, Byte, in.requested_size);
+			slice_zero(out->allocation);
+		break;
+
+		case AllocatorOp_Free:
+		break;
+		case AllocatorOp_Reset:
+			vm->commit_used = 0;
+		break;
+
+		case AllocatorOp_Grow: {
+			SSIZE grow_amount = in.requested_size - in.old_allocation.len;
+			assert(grow_amount >= 0);
+			SSIZE current_offset = vm->reserve_start + vm->commit_used;
+			assert(in.old_allocation.ptr == current_offset);
+			Slice_Byte allocation = varena_push_array(vm, Byte, grow_amount, .alignment = in.alignment);
+			assert(allocation.ptr != nullptr);
+			out->allocation = (Slice_Byte){ in.old_allocation.ptr, in.requested_size };
+			slice_zero(allocation);
+		}
+		break;
+		case AllocatorOp_Grow_NoZero: {
+			SSIZE grow_amount = in.requested_size - in.old_allocation.len;
+			assert(grow_amount >= 0);
+			SSIZE current_offset = vm->reserve_start + vm->commit_used;
+			assert(in.old_allocation.ptr == current_offset);
+			Slice_Byte allocation = varena_push_array(vm, Byte, grow_amount, .alignment = in.alignment);
+			assert(allocation.ptr != nullptr);
+			out->allocation = (Slice_Byte){ in.old_allocation.ptr, in.requested_size };
+		}
+		break
+		case AllocatorOp_Shrink: {
+			SSIZE current_offset = vm->reserve_start + vm->commit_used;
+			SSIZE shrink_amount = in.old_allocation.len - in.requested_size;
+			assert(shrink_amount >= 0);
+			assert(in.old_allocation.ptr == current_offset);
+			vm->commit_used -= shrink_amount;
+			out->allocation = (Slice_Byte){ in.old_allocation.ptr, in.requested_size };
+		}
+		break;
+
+		case AllocatorOp_Rewind:
+			vm->commit_used = cast(SSIZE, in.old_allocation.ptr);
+		case AllocatorOp_SavePoint:
+			out->allocation.ptr = cast(Byte*, vm->commit_used);
+		break;
+
+		case AllocatorOp_Query:
+			out->features = 
+				AllocatorQuery_Alloc
+			|	AllocatorQuery_Resize
+			|	AllocatorQuery_Reset
+			|	AllocatorQuery_Rewind
+			;
+			out->max_alloc = vm->reserve - vm->committed;
+			out->min_alloc = kilo(4);
+			out->left      = out->max_alloc;
+		break;
+	}
 }
 #pragma endregion VArena
+
+#pragma region Arena (Casey-Ryan Composite Arena)
+Arena* arena__make(Opts_arena_make* opts) {
+	assert(opts != nullptr);
+	SSIZE header_size = align_pow2(size_of(Arena), MEMORY_ALIGNMENT_DEFAULT);
+	VArena* current = varena_make(opts);
+	assert(current != nullptr);
+	Arena* arena = varena_push(current, Arena);
+	* arena = {
+		.backing    = varena;
+		.prev       = nullptr;
+		.current    = arena;
+		.base_pos   = 0;
+		.pos        = header_size;
+		.flags      = opts->flags;
+	}
+	return arena;
+}
+Slice_Byte arena__push(Arena* arena, SSIZE amount, SSIZE type_width, Opts_arena* opts) {
+	assert(opts != nullptr);
+	Arena* active        = arena->current;
+	SSIZE size_requested = amount * type_width;
+	SSIZE alignment      = opts->alignment ? opts->alignment : MEMORY_ALIGNMENT_DEFAULT;
+	SSIZE size_aligned   = align_pow2(size_requested, alignment);
+	SSIZE pos_pre        = align_pow2(current->pos,   alignment);
+	SSIZE pos_pst        = pos_pre + size_requested;
+	B32 should_chain = 
+		((arena->flags & ArenaFlag_NoChain) == 0)
+	&&	current->backing->reserve < pos_pst;	
+	if (should_chain)
+	{
+		Arena* new_arena = arena_make(
+			.base_addr    = 0,
+			.reserve_size = current->backing->reserve,
+			.commit_size  = current->backing->commit_size,
+			.flags        = current->backing->flags,
+		);
+		new_arena = current->base_pos + current->backing->reserve;
+		sll_stack_push_n(arena->current, new_arena, prev);
+	}
+	Byte*      result  = cast(Byte*, active + pos_pre);
+	Slice_Byte vresult = varena_push_array(arena->current->backing, Byte, size_aligned, .alignment = alignment);
+	arena->current->pos = pos_pst;
+	assert(result  == vresult.ptr);
+	slice_assert(vresult);
+	return vresult;
+}
+#pragma endregion Arena
 
 #pragma region Key Table 1-Layer Linear (KT1L)
 SSIZE kt1l__populate_slice_a2(KT1L_Byte* kt, KT1L_Info info, Slice_Byte values, SSIZE num_values ) {
@@ -922,7 +1114,6 @@ SSIZE kt1l__populate_slice_a2(KT1L_Byte* kt, KT1L_Info info, Slice_Byte values, 
 
 		Slice_Byte a2_key        = { a2_cursor,                   info.type_width };
 		Slice_Byte a2_value      = { a2_cursor + info.type_width, info.type_width };
-
         slice_copy(slot_value, a2_value);
         hash64_djb8(slot_key,  a2_key);
 
