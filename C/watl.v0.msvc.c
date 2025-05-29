@@ -1,6 +1,6 @@
 /*
 WATL Exercise
-Version:   0 (From Scratch, 1-Stage Compilation, Zero-Dependencies)
+Version:   0 (From Scratch, 1-Stage Compilation, MSVC & WinAPI Only)
 Host:      Windows 11
 Toolchain: MSVC 19.43
 */
@@ -153,19 +153,26 @@ void slice__zero(Slice_Byte mem, SSIZE typewidth);
 
 #define sll_stack_push_n(f, n, next) do { (n)->next = (f); (f) = (n); } while(0)
 
-#define sll_queue_push_nz(nil, f, l, n, next) \
-(                                             \
-	check_nil(nil, f) ? (                     \
-		(f) = (l) = (n),                      \
-		set_nil(nil, (n)->next)               \
-	)                                         \
-	: (                                       \
-		(l)->next=(n),                        \
-		(l) = (n),                            \
-		set_nil(nil,(n)->next)                \
-	)                                         \
-)
-#define sll_queue_push_n(f, l, n, next) sll_queue_push_nz(0, f, l, n, next)
+inline void
+sll__queue_push_nz(
+	void* nil, 
+	void** f, 
+	void** l, void** l_next, 
+	void*  n, void** n_next
+) 
+{
+	if (check_nil(nil, *f)) {
+		*f      = n;
+		*l      = n;
+		*n_next = nil;
+	}
+	else {
+		*l_next = n;
+		*l      = n;
+		*n_next = nil;
+	}
+}
+#define sll_queue_push_n(f, l, n, next) sll__queue_push_nz(0, &f, &l, &l->next, n, &n->next)
 #pragma endregion Memory
 
 #pragma region Math
@@ -549,7 +556,7 @@ inline Str8 str8_from_str8gen(Str8Gen gen) { return (Str8){gen.ptr, gen.len}; }
 void str8gen_append_str8(Str8Gen* gen, Str8 str);
 void str8gen__append_fmt(Str8Gen* gen, Str8 fmt_template, Slice_A2_Str8* tokens);
 
-#define str8gen_append_fmt(gen, fmt_template, ...) str8gen__append_fmt(gen, fmt_template, slice_from_array(A2_Str8, __VA_ARGS__))
+#define str8gen_append_fmt(gen, fmt_template, ...) str8gen__append_fmt(gen, lit(fmt_template), slice_arg_from_array(A2_Str8, __VA_ARGS__))
 #pragma endregion String Operations
 
 #pragma region File System
@@ -580,11 +587,11 @@ typedef def_struct(WATL_Tok) {
 };
 typedef def_Slice(WATL_Tok);
 typedef def_enum(U32, WATL_LexStatus) {
-	WATL_LexStatus_MemFail_Alloc,
-	WATL_LexStatus_MemFail_SliceConstraintFail,
-	WATL_LexStatus_PosUntrackable,
-	WATL_LexStatus_UnsupportedCodepoints,
-	WATL_LexStatus_MessageOverflow,
+	WATL_LexStatus_MemFail_Alloc               = (1 << 0),
+	WATL_LexStatus_MemFail_SliceConstraintFail = (1 << 1),
+	WATL_LexStatus_PosUntrackable              = (1 << 2),
+	WATL_LexStatus_UnsupportedCodepoints       = (1 << 3),
+	WATL_LexStatus_MessageOverflow             = (1 << 4),
 };
 typedef def_struct(WATL_Pos) {
 	S32 line;
@@ -604,10 +611,9 @@ typedef def_struct(WATL_LexInfo) {
 typedef def_struct(Opts_watl_lex) {
 	AllocatorInfo ainfo_msgs;
 	AllocatorInfo ainfo_toks;
-	S32 max_msgs;
-	B8  failon_unsupported_codepoints;
-	B8  failon_pos_untrackable;
-	B8  failon_slice_constraint_fail;
+	B8 failon_unsupported_codepoints;
+	B8 failon_pos_untrackable;
+	B8 failon_slice_constraint_fail;
 };
 void         api_watl_lex(WATL_LexInfo* info, Str8 source, Opts_watl_lex* opts);
 WATL_LexInfo watl__lex   (                    Str8 source, Opts_watl_lex* opts);
@@ -618,32 +624,36 @@ typedef def_Slice(WATL_Node);
 typedef Slice_WATL_Node WATL_Line;
 typedef def_Slice(WATL_Line);
 typedef def_struct(WATL_ParseMsg) {
+	WATL_ParseMsg* next;
 	Str8 content;
-	WATL_Line line;
-	WATL_Tok* tok;
-	WATL_Pos  pos;
+	WATL_Line* line;
+	WATL_Tok*  tok;
+	WATL_Pos   pos;
 };
-typedef def_Slice(WATL_ParseMsg);
 typedef def_enum(U32, WATL_ParseStatus) {
-	WATL_ParseStatus_MemFail_Alloc,
-	WATL_ParseStatus_MemFail_SliceConstraintFail,
-	WATL_ParseStatus_PosUntrackable,
-	WATL_ParseStatus_UnsupportedTokens,
-	WATL_ParseStatus_MessageOverflow,
+	WATL_ParseStatus_MemFail_Alloc               = (1 << 0),
+	WATL_ParseStatus_MemFail_SliceConstraintFail = (1 << 1),
+	WATL_ParseStatus_PosUntrackable              = (1 << 2),
+	WATL_ParseStatus_UnsupportedTokens           = (1 << 3),
+	WATL_ParseStatus_MessageOverflow             = (1 << 4),
 };
 typedef def_struct(WATL_ParseInfo) {
-	Slice_WATL_Line lines;
-	Slice_WATL_ParseMsg msgs;
+	Slice_WATL_Line     lines;
+	WATL_ParseMsg       msgs;
 	WATL_ParseStatus    signal;
 };
 typedef def_struct(Opts_watl_parse) {
-	AllocatorInfo backing_nodes;
-	AllocatorInfo backing_lines;
+	AllocatorInfo ainfo_msgs;
+	AllocatorInfo ainfo_nodes;
+	AllocatorInfo ainfo_lines;
 	Str8Cache*    str_cache;
+	B8 failon_slice_constraint_fail;
 };
 void           api_watl_parse(WATL_ParseInfo* info, Slice_WATL_Tok tokens, Opts_watl_parse* opts);
 WATL_ParseInfo watl__parse   (                      Slice_WATL_Tok tokens, Opts_watl_parse* opts);
 #define watl_parse(tokens, ...) watl__parse(tokens, &(Opts_watl_parse){__VA_ARGS__})
+
+Str8 watl_dump_listing(AllocatorInfo buffer, Slice_WATL_Line lines);
 #pragma endregion WATL
 
 #pragma endregion Header
@@ -839,7 +849,7 @@ void farena_allocator_proc(AllocatorProc_In in, AllocatorProc_Out* out)
 		case AllocatorOp_Grow:
 		case AllocatorOp_Grow_NoZero:
 		case AllocatorOp_Shrink:
-			asser_msg("not implemented");
+			assert_msg(false, "not implemented");
 		break;
 		case AllocatorOp_Reset:
 			farena_reset(arena);
@@ -1021,7 +1031,7 @@ void varena_rewind(VArena* vm, AllocatorSP sp) {
 	vm->commit_used = sp.slot; 
 }
 inline AllocatorSP varena_save(VArena* vm) { return (AllocatorSP){varena_allocator_proc, vm->commit_used}; }         
-void varena__allocator_proc(AllocatorProc_In in, AllocatorProc_Out* out)
+void varena_allocator_proc(AllocatorProc_In in, AllocatorProc_Out* out)
 {
 	VArena* vm = cast(VArena*, in.data);
 	switch (in.op)
@@ -1150,6 +1160,7 @@ void arena_release(Arena* arena) {
 		varena_release(curr->backing);
 	}
 }
+inline void arena_reset(Arena* arena) { arena_rewind(arena, (AllocatorSP){.type_sig = arena_allocator_proc, .slot = 0}); }
 void arena_rewind(Arena* arena, AllocatorSP save_point) {
 	assert(arena);
 	assert(save_point.type_sig == arena_allocator_proc);
@@ -1183,7 +1194,7 @@ void arena_allocator_proc(AllocatorProc_In in, AllocatorProc_Out* out)
 		case AllocatorOp_Free:
 		break;
 		case AllocatorOp_Reset:
-			arena_rest(arena);
+			arena_reset(arena);
 		break;
 		case AllocatorOp_Grow:
 		case AllocatorOp_Grow_NoZero:
@@ -1794,31 +1805,11 @@ void api_watl_lex(WATL_LexInfo* info, Str8 source, Opts_watl_lex* opts)
 	assert(info != nullptr);
 	slice_assert(source);
 	assert(opts != nullptr);
-	S32 max_msgs = opts->max_msgs ? opts->max_msgs : 10;
+	assert(opts->ainfo_msgs.proc != nullptr);
+	assert(opts->ainfo_toks.proc != nullptr);
+	AllocatorProc_Out start_snapshot; {  opts->ainfo_toks.proc((AllocatorProc_In){.op = AllocatorOp_Query}, & start_snapshot); }
 	WATL_LexMsg* msg_last = nullptr;
 
-	enum {
-		a_msg_unspecified  = 1,
-		a_toks_unspecified = 2,
-		a_both_unspecifeid = 3,
-	};
-	AllocatorInfo a_msg  = opts->ainfo_msgs;
-	AllocatorInfo a_toks = opts->ainfo_toks; {
-		S32 alloc_option_status = 0;
-		if (a_msg.proc == nullptr)  { alloc_option_status += a_msg_unspecified; }
-		if (a_toks.proc == nullptr) { alloc_option_status += a_toks_unspecified; }
-		Arena* arena = nullptr;
-		if (alloc_option_status > 0) { arena = arena_make(); }
-		switch (alloc_option_status) {
-			case 0: break;
-			case a_msg_unspecified:  a_msg  = ainfo_arena(arena); break;
-			case a_toks_unspecified: a_toks = ainfo_arena(arena); break;
-			case a_both_unspecifeid: a_msg  = ainfo_arena(arena); a_toks = ainfo_arena(arena); break;
-		}
-	}
-	AllocatorProc_Out start_snapshot; { 
-		a_toks.proc((AllocatorProc_In){.op = AllocatorOp_Query}, & start_snapshot);
-	}
 	UTF8* end    = source.ptr + source.len;
 	UTF8* cursor = source.ptr;
 	UTF8* prev   = source.ptr;
@@ -1834,7 +1825,7 @@ void api_watl_lex(WATL_LexInfo* info, Str8 source, Opts_watl_lex* opts)
 			case WATL_Tok_Tab:
 			{
 				if (* prev != * cursor) {
-					tok            = alloc_type(a_toks, WATL_Tok);
+					tok            = alloc_type(opts->ainfo_toks, WATL_Tok);
 					tok->code      = cursor;
 					was_formatting = true;
 					++ num;
@@ -1843,7 +1834,7 @@ void api_watl_lex(WATL_LexInfo* info, Str8 source, Opts_watl_lex* opts)
 			}
 			break;
 			case WATL_Tok_LineFeed: {
-					tok            = alloc_type(a_toks, WATL_Tok);
+					tok            = alloc_type(opts->ainfo_toks, WATL_Tok);
 					tok->code      = cursor;
 					cursor        += 1;
 					was_formatting = true; 
@@ -1852,7 +1843,7 @@ void api_watl_lex(WATL_LexInfo* info, Str8 source, Opts_watl_lex* opts)
 			break;
 			// Assuming what comes after is line feed.
 			case WATL_Tok_CarriageReturn: {
-					tok            = alloc_type(a_toks, WATL_Tok);
+					tok            = alloc_type(opts->ainfo_toks, WATL_Tok);
 					tok->code      = cursor;
 					cursor        += 2;
 					was_formatting = true; 
@@ -1862,7 +1853,7 @@ void api_watl_lex(WATL_LexInfo* info, Str8 source, Opts_watl_lex* opts)
 			default:
 			{
 				if (was_formatting) {
-					tok            = alloc_type(a_toks, WATL_Tok);
+					tok            = alloc_type(opts->ainfo_toks, WATL_Tok);
 					tok->code      = cursor;
 					was_formatting = false;
 					++ num;
@@ -1875,20 +1866,145 @@ void api_watl_lex(WATL_LexInfo* info, Str8 source, Opts_watl_lex* opts)
 		code = * cursor;
 	}
 	AllocatorProc_Out end_snapshot; { 
-		a_toks.proc((AllocatorProc_In){.op = AllocatorOp_Query}, & end_snapshot);
+		opts->ainfo_toks.proc((AllocatorProc_In){.op = AllocatorOp_Query}, & end_snapshot);
 	}
 	SSIZE num_bytes = end_snapshot.save_point.slot - start_snapshot.save_point.slot;
-	if (num_bytes <= start_snapshot.left) {
-		WATL_LexMsg* msg = alloc_type(a_msg, WATL_LexMsg);
+	if (num_bytes > start_snapshot.left) {
+		info->signal |= WATL_LexStatus_MemFail_SliceConstraintFail;
+		WATL_LexMsg* msg = alloc_type(opts->ainfo_msgs, WATL_LexMsg);
 		msg->pos     = (WATL_Pos){ -1, -1 };
 		msg->tok     = tok;
 		msg->content = lit("Token slice allocation was not contiguous");
-		info->signal = WATL_LexStatus_MemFail_SliceConstraintFail;
 		sll_queue_push_n(info->msgs, msg_last, msg, next);
 		assert(opts->failon_slice_constraint_fail == false);
 	}
 	info->toks.ptr = tok - num;
 	info->toks.len = num;
+}
+WATL_LexInfo watl__lex(Str8 source, Opts_watl_lex* opts) { WATL_LexInfo info; api_watl_lex(& info, source, opts); return info; }
+
+Str8 watl_tok_str8(Slice_WATL_Tok toks, WATL_Tok* tok) {
+	WATL_Tok* next = tok + 1;
+	USIZE start    = cast(USIZE, toks.ptr->code);
+	USIZE curr     = cast(USIZE, tok->code);
+	USIZE offset   = curr - start;
+	SSIZE left     = toks.len - offset;
+	B32   last_tok = (start + toks.len) == (curr + left);
+	Str8  text     = {0};
+	text.ptr = tok->code;
+	text.len = next > (toks.ptr + toks.len) ? 
+		left
+	// Othwerise its the last minus the curr.
+	:	cast(SSIZE, next->code - tok->code);
+	return text;
+}
+
+void api_watl_parse(WATL_ParseInfo* info, Slice_WATL_Tok tokens, Opts_watl_parse* opts)
+{
+	assert(opts != nullptr);
+	assert(opts->ainfo_lines.proc != nullptr);
+	assert(opts->ainfo_msgs.proc != nullptr);
+	assert(opts->ainfo_nodes.proc != nullptr);
+	assert(opts->str_cache != nullptr);
+	AllocatorProc_Out start_lines_snapshot; { opts->ainfo_lines.proc((AllocatorProc_In){.op = AllocatorOp_Query}, & start_lines_snapshot); }
+	AllocatorProc_Out start_nodes_snapshot; { opts->ainfo_nodes.proc((AllocatorProc_In){.op = AllocatorOp_Query}, & start_nodes_snapshot); }
+	WATL_ParseMsg* msg_last = nullptr;
+
+	WATL_Line* line = alloc_type(opts->ainfo_lines, WATL_Line);
+	WATL_Node* curr = alloc_type(opts->ainfo_nodes, WATL_Node);
+	* curr      = (WATL_Node){0};
+	* line      = (WATL_Line){ curr, 0 };
+	info->lines = (Slice_WATL_Line){ line, 0 };
+	for (slice_iter(tokens, token))
+	{
+		switch(* token->code)
+		{
+			case WATL_Tok_CarriageReturn:
+			case WATL_Tok_LineFeed:
+			{
+				AllocatorProc_Out end_nodes_snapshot; { opts->ainfo_nodes.proc((AllocatorProc_In){.op = AllocatorOp_Query}, & end_nodes_snapshot); }
+				SSIZE distance_nodes = end_nodes_snapshot.left - end_nodes_snapshot.save_point.slot;
+				if (distance_nodes > start_lines_snapshot.left) {
+					info->signal |= WATL_ParseStatus_MemFail_SliceConstraintFail;
+					WATL_ParseMsg* msg = alloc_type(opts->ainfo_msgs, WATL_ParseMsg);
+					msg->content = lit("Nodes slice allocation was not contiguous");
+					msg->pos     = (WATL_Pos){info->lines.len, line->len};
+					msg->line    = line;
+					msg->tok     = token;
+					sll_queue_push_n(info->msgs, msg_last, msg, next);
+					assert(opts->failon_slice_constraint_fail == false);
+				}
+				opts->ainfo_nodes.proc((AllocatorProc_In){.op = AllocatorOp_Query}, & start_nodes_snapshot);
+				WATL_Line* new_line = alloc_type(opts->ainfo_lines, WATL_Line);
+				line             = new_line;
+				line->ptr        = curr;
+				line->len        = 0;
+				info->lines.len += 1;
+			}
+			continue;
+
+			default:
+			break;
+		}
+		Str8 tok_str = watl_tok_str8(tokens, token);
+		* curr       = cache_str8(opts->str_cache, tok_str);
+		curr         = alloc_type(opts->ainfo_nodes, WATL_Node);
+		* curr       = (WATL_Node){0};
+		line->len   += 1;
+		continue;
+	}
+	AllocatorProc_Out end_lines_snapshot; { opts->ainfo_lines.proc((AllocatorProc_In){.op = AllocatorOp_Query}, & end_lines_snapshot); }
+
+	SSIZE distance_lines = end_lines_snapshot.left - start_lines_snapshot.save_point.slot;
+	if (distance_lines > start_lines_snapshot.left) {
+		info->signal |= WATL_ParseStatus_MemFail_SliceConstraintFail;
+		WATL_ParseMsg* msg = alloc_type(opts->ainfo_msgs, WATL_ParseMsg);
+		msg->content = lit("Line slice allocation was not contiguous");
+		msg->pos     = (WATL_Pos){-1, -1};
+		sll_queue_push_n(info->msgs, msg_last, msg, next);
+		assert(opts->failon_slice_constraint_fail == false);
+		return;
+	}
+}
+WATL_ParseInfo watl__parse(Slice_WATL_Tok tokens, Opts_watl_parse* opts);
+
+Str8 watl_dump_listing(AllocatorInfo buffer, Slice_WATL_Line lines)
+{
+	local_persist Byte scratch[kilo(64)] = {0}; FArena sarena = farena_make(slice_fmem(scratch)); AllocatorInfo sinfo = ainfo_farena(sarena);
+
+	Str8Gen result = str8gen_make(buffer);
+	U32 line_num = 0;
+	for (slice_iter(lines, line))
+	{
+	#define fmt_entry(label, value) { lit(label), value }
+		++ line_num;
+		Str8 str_line_num  = str8_from_u32(sinfo, line_num,  10, 0, 0);
+		Str8 str_chunk_num = str8_from_u32(sinfo, line->len, 10, 0, 0);
+		str8gen_append_fmt(& result, "Line <line_num> - Chunks <chunk_num>:\n"
+		,	fmt_entry("line_num",  str_line_num)
+		,	fmt_entry("chunk_num", str_chunk_num)
+		);
+		for (slice_iter(* line, chunk)) 
+		{
+			Str8 id;
+			switch (* chunk->ptr)
+			{
+				case WATL_Tok_Space: id = lit("Space");   break;
+				case WATL_Tok_Tab:   id = lit("Tab");     break;
+				default:             id = lit("Visible"); break;
+			}
+			Str8 str_chunk_len = str8_from_u32(sinfo, chunk->len, 10, 0, 0);
+			str8gen_append_fmt(& result, "\t<id>(<size>): '<chunk>'\n"
+			,	fmt_entry("id", id)
+			,	fmt_entry("size", str_chunk_len)
+			,	fmt_entry("chunk", * chunk)
+			);
+		}
+		farena_reset(& sarena);
+	#undef push_str8_u32
+	#undef fmt_entry_u32
+	}
+	return (Str8){ result.ptr, result.len };
 }
 #pragma endregion WATL
 
@@ -1898,5 +2014,37 @@ int main()
 {
 	os_init();
 
+	VArena* vm_file = varena_make(.reserve_size = giga(4), .flags = VArenaFlag_NoLargePages);
+	FileOpInfo file = file_read_contents(lit("watl.v0.msvc.c"), .backing = ainfo(vm_file));
 
+	Arena* a_msgs = arena_make();
+	Arena* a_toks = arena_make();
+	WATL_LexInfo lex_res = watl_lex(pcast(Str8, file.content),
+		.ainfo_msgs = ainfo_arena(a_msgs),
+		.ainfo_toks = ainfo_arena(a_toks),
+	);
+	assert(lex_res.signal & WATL_LexStatus_MemFail_SliceConstraintFail);
+
+	Arena* str_cache_kt1_ainfo = arena_make();
+	Str8Cache str_cache = str8cache_make(
+		.str_reserve    = ainfo_arena(arena_make()),
+		.cell_reserve   = ainfo_arena(str_cache_kt1_ainfo),
+		.tbl_backing    = ainfo_arena(str_cache_kt1_ainfo),
+		.cell_pool_amnt = kilo(4),
+		.table_size     = kilo(32),
+	);
+
+	Arena* a_lines = arena_make();
+	WATL_ParseInfo parse_res = watl_parse(lex_res.toks, 
+		.ainfo_msgs  = ainfo_arena(a_msgs),
+		.ainfo_nodes = ainfo_arena(a_toks),
+		.ainfo_lines = ainfo_arena(a_lines),
+		.str_cache   = & str_cache
+	);
+	assert(parse_res.signal & WATL_ParseStatus_MemFail_SliceConstraintFail);
+
+	arena_reset(a_msgs);
+	arena_reset(a_toks);
+	Str8 listing = watl_dump_listing(ainfo_arena(a_msgs), parse_res.lines);
+	return 0;
 }
