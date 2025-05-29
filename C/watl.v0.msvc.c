@@ -153,26 +153,19 @@ void slice__zero(Slice_Byte mem, SSIZE typewidth);
 
 #define sll_stack_push_n(f, n, next) do { (n)->next = (f); (f) = (n); } while(0)
 
-inline void
-sll__queue_push_nz(
-	void* nil, 
-	void** f, 
-	void** l, void** l_next, 
-	void*  n, void** n_next
-) 
-{
-	if (check_nil(nil, *f)) {
-		*f      = n;
-		*l      = n;
-		*n_next = nil;
-	}
-	else {
-		*l_next = n;
-		*l      = n;
-		*n_next = nil;
-	}
-}
-#define sll_queue_push_n(f, l, n, next) sll__queue_push_nz(0, &f, &l, &l->next, n, &n->next)
+#define sll_queue_push_nz(nil, f, l, n, next) \
+(                                             \
+	check_nil(nil, f) ? (                     \
+		(f) = (l) = (n),                      \
+		set_nil(nil, (n)->next)               \
+	)                                         \
+	: (                                       \
+		(l)->next=(n),                        \
+		(l) = (n),                            \
+		set_nil(nil,(n)->next)                \
+	)                                         \
+)
+#define sll_queue_push_n(f, l, n, next) sll_queue_push_nz(0, f, l, n, next)
 #pragma endregion Memory
 
 #pragma region Math
@@ -639,7 +632,7 @@ typedef def_enum(U32, WATL_ParseStatus) {
 };
 typedef def_struct(WATL_ParseInfo) {
 	Slice_WATL_Line     lines;
-	WATL_ParseMsg       msgs;
+	WATL_ParseMsg*      msgs;
 	WATL_ParseStatus    signal;
 };
 typedef def_struct(Opts_watl_parse) {
@@ -1966,7 +1959,7 @@ void api_watl_parse(WATL_ParseInfo* info, Slice_WATL_Tok tokens, Opts_watl_parse
 		return;
 	}
 }
-WATL_ParseInfo watl__parse(Slice_WATL_Tok tokens, Opts_watl_parse* opts);
+WATL_ParseInfo watl__parse(Slice_WATL_Tok tokens, Opts_watl_parse* opts) { WATL_ParseInfo info; api_watl_parse(& info, tokens, opts); return info; }
 
 Str8 watl_dump_listing(AllocatorInfo buffer, Slice_WATL_Line lines)
 {
@@ -2015,7 +2008,7 @@ int main()
 	os_init();
 
 	VArena* vm_file = varena_make(.reserve_size = giga(4), .flags = VArenaFlag_NoLargePages);
-	FileOpInfo file = file_read_contents(lit("watl.v0.msvc.c"), .backing = ainfo(vm_file));
+	FileOpInfo file = file_read_contents(lit("watl.v0.msvc.c"), .backing = ainfo_varena(vm_file));
 
 	Arena* a_msgs = arena_make();
 	Arena* a_toks = arena_make();
