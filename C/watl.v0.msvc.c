@@ -46,6 +46,7 @@ enum {
 #define local_persist                       static
 #define global                              static
 #define offset_of(type, member)             cast(SSIZE, & (((type*) 0)->member))
+#define static_assert                       _Static_assert
 #define typeof                              __typeof__
 #define typeof_ptr(ptr)                     __typeof__(ptr[0])                 
 
@@ -147,7 +148,24 @@ void slice__zero(Slice_Byte mem, SSIZE typewidth);
 	.len = farray_len( farray_init(type, __VA_ARGS__))          \
 }
 
+#define check_nil(nil, p) ((p) == 0 || (p) == nil)
+#define set_nil(nil, p)   ((p) = nil)
+
 #define sll_stack_push_n(f, n, next) do { (n)->next = (f); (f) = (n); } while(0)
+
+#define sll_queue_push_nz(nil, f, l, n, next) \
+(                                             \
+	check_nil(nil, f) ? (                     \
+		(f) = (l) = (n),                      \
+		set_nil(nil, (n)->next)               \
+	)                                         \
+	: (                                       \
+		(l)->next=(n),                        \
+		(l) = (n),                            \
+		set_nil(nil,(n)->next)                \
+	)                                         \
+)
+#define sll_queue_push_n(f, l, n, next) sll_queue_push_nz(0, f, l, n, next)
 #pragma endregion Memory
 
 #pragma region Math
@@ -189,6 +207,10 @@ typedef def_enum(U64, AllocatorQueryFlags) {
 	// Ability to rewind to a save point (ex: arenas, stack), must also be able to save such a point
 	AllocatorQuery_Rewind       = (1 << 6), 
 };
+typedef def_struct(AllocatorSP) {
+	void* type_sig;
+	SSIZE slot;
+};
 typedef def_struct(AllocatorProc_In) {
 	void*        data;
 	AllocatorOp  op;
@@ -197,9 +219,12 @@ typedef def_struct(AllocatorProc_In) {
 	Slice_Byte   old_allocation;
 };
 typedef def_struct(AllocatorProc_Out) {
-	Slice_Byte          allocation;
+	union {
+		Slice_Byte  allocation;
+		AllocatorSP save_point;
+	};
 	AllocatorQueryFlags features;
-	SSIZE               left;
+	SSIZE               left; // Contiguous memory left
 	SSIZE               max_alloc;
 	SSIZE               min_alloc;
 	B32                 continuity_break; // Whether this allocation broke continuity with the previous (address space wise)
@@ -209,10 +234,8 @@ typedef def_struct(AllocatorInfo) {
 	AllocatorProc* proc;
 	void*          data;
 };
-typedef def_struct(AllocatorSP) {
-	AllocatorProc* type_sig;
-	SSIZE          slot;
-};
+
+static_assert(size_of(AllocatorSP) <= size_of(Slice_Byte));
 
 #define MEMORY_ALIGNMENT_DEFAULT (2 * size_of(void*))
 
@@ -313,6 +336,7 @@ VArena* varena__make(Opts_varena_make* opts);
 Slice_Byte  varena__push  (VArena* arena, SSIZE amount, SSIZE type_width, Opts_varena* opts);
 void        varena_release(VArena* arena);
 void        varena_rewind (VArena* arena, AllocatorSP save_point);
+void        varena_reset  (VArena* arena);
 AllocatorSP varnea_save   (VArena  arena);
 
 void varena_allocator_proc(AllocatorProc_In in, AllocatorProc_Out* out); 
@@ -343,6 +367,7 @@ typedef Opts_varena_make Opts_arena_make;
 Arena*      arena__make  (Opts_arena_make* opts);
 Slice_Byte  arena__push  (Arena* arena, SSIZE amount, SSIZE type_width, Opts_arena* opts);
 void        arena_release(Arena* arena);
+void        arena_reset  (Arena* arena);
 void        arena_rewind (Arena* arena, AllocatorSP save_point);
 AllocatorSP arena_save   (Arena* arena);
 
@@ -566,13 +591,13 @@ typedef def_struct(WATL_Pos) {
 	S32 column;
 };
 typedef def_struct(WATL_LexMsg) {
+	WATL_LexMsg* next;
 	Str8      content;
 	WATL_Tok* tok;
 	WATL_Pos  pos;
 };
-typedef def_Slice(WATL_LexMsg);
 typedef def_struct(WATL_LexInfo) {
-	Slice_WATL_LexMsg msgs;
+	WATL_LexMsg*      msgs;
 	Slice_WATL_Tok    toks;
 	WATL_LexStatus    signal;
 };
@@ -582,6 +607,7 @@ typedef def_struct(Opts_watl_lex) {
 	S32 max_msgs;
 	B8  failon_unsupported_codepoints;
 	B8  failon_pos_untrackable;
+	B8  failon_slice_constraint_fail;
 };
 void         api_watl_lex(WATL_LexInfo* info, Str8 source, Opts_watl_lex* opts);
 WATL_LexInfo watl__lex   (                    Str8 source, Opts_watl_lex* opts);
@@ -658,7 +684,6 @@ void slice__copy(Slice_Byte dest, SSIZE dest_typewidth, Slice_Byte src, SSIZE sr
 #pragma endregion Memory Operations
 
 #pragma region Allocator Interface
-
 inline
 AllocatorQueryFlags allocator_query(AllocatorInfo ainfo) { 
 	assert(info.proc != nullptr);
@@ -680,7 +705,15 @@ void mem_reset(AllocatorInfo ainfo) {
 inline
 void mem_rewind(AllocatorInfo ainfo, AllocatorSP save_point) {
 	assert(ainfo.proc != nullptr);
-	ainfo.proc((AllocatorProc_In){.data = ainfo.data, .op = AllocatorOp_Rewind, .old_allocation = {.ptr = cast(Byte*, save_point.slot)}}, &(AllocatorProc_Out){});
+	ainfo.proc((AllocatorProc_In){.data = ainfo.data, .op = AllocatorOp_Rewind, .old_allocation = {.ptr = cast(Byte*, & save_point)}}, &(AllocatorProc_Out){});
+}
+
+inline
+AllocatorSP mem_save_point(AllocatorInfo ainfo) {
+	assert(ainfo.proc != nullptr);
+	AllocatorProc_Out out;
+	ainfo.proc((AllocatorProc_In){.data = ainfo.data, .op = AllocatorOp_SavePoint}, & out);
+	return * cast(AllocatorSP*, & out.allocation);
 }
 
 inline
@@ -745,7 +778,6 @@ Slice_Byte mem__shrink(AllocatorInfo ainfo, Slice_Byte mem, SSIZE size, Opts_mem
 	ainfo.proc(in, & out);
 	return out.allocation;
 }
-
 #pragma endregion Allocator Interface
 
 #pragma region FArena (Fixed-Sized Arena)
@@ -781,7 +813,7 @@ void farena_rewind(FArena* arena, AllocatorSP save_point) {
 }
 inline
 AllocatorSP farena_save (FArena  arena) { 
-	AllocatorSP sp = { .type_sig = farena_allocator_proc, .slot = cast(SSIZE, arena.start) }; 
+	AllocatorSP sp = { .type_sig = farena_allocator_proc, .slot = cast(SSIZE, arena.used) }; 
 	return sp; 
 }
 void farena_allocator_proc(AllocatorProc_In in, AllocatorProc_Out* out)
@@ -807,24 +839,28 @@ void farena_allocator_proc(AllocatorProc_In in, AllocatorProc_Out* out)
 		case AllocatorOp_Grow:
 		case AllocatorOp_Grow_NoZero:
 		case AllocatorOp_Shrink:
+			asser_msg("not implemented");
+		break;
 		case AllocatorOp_Reset:
+			farena_reset(arena);
+		break;
 		case AllocatorOp_Rewind:
-			assert_msg(true, "not_implemented");
+			farena_rewind(arena, * cast(AllocatorSP*, in.old_allocation.ptr));
 		break;
 		case AllocatorOp_SavePoint:
-			out->allocation.ptr = cast(Byte*, farena_save(* arena).slot);
+			out->save_point = farena_save(* arena);
 		break;
 		case AllocatorOp_Query:
 			out->features = 
 			  AllocatorQuery_Alloc 
-			| AllocatorQuery_Grow 
 			| AllocatorQuery_Reset 
-			| AllocatorQuery_Resize 
+			// | AllocatorQuery_Resize 
 			| AllocatorQuery_Rewind
-			| AllocatorQuery_Shrink
 			;
-			out->max_alloc = arena->capacity - arena->used;
-			out->min_alloc = 0;
+			out->max_alloc  = arena->capacity - arena->used;
+			out->min_alloc  = 0;
+			out->left       = out->max_alloc;
+			out->save_point = farena_save(* arena);
 		break;
 	}
 	return;
@@ -984,7 +1020,7 @@ void varena_rewind(VArena* vm, AllocatorSP sp) {
 	assert(sp.type_sig == varena_allocator_proc);
 	vm->commit_used = sp.slot; 
 }
-inline AllocatorSP varena_save(VArena vm) { return (AllocatorSP){varena_allocator_proc, vm.commit_used}; }         
+inline AllocatorSP varena_save(VArena* vm) { return (AllocatorSP){varena_allocator_proc, vm->commit_used}; }         
 void varena__allocator_proc(AllocatorProc_In in, AllocatorProc_Out* out)
 {
 	VArena* vm = cast(VArena*, in.data);
@@ -1038,7 +1074,7 @@ void varena__allocator_proc(AllocatorProc_In in, AllocatorProc_Out* out)
 		case AllocatorOp_Rewind:
 			vm->commit_used = cast(SSIZE, in.old_allocation.ptr);
 		case AllocatorOp_SavePoint:
-			out->allocation.ptr = cast(Byte*, vm->commit_used);
+			out->save_point = varena_save(vm);
 		break;
 
 		case AllocatorOp_Query:
@@ -1048,15 +1084,17 @@ void varena__allocator_proc(AllocatorProc_In in, AllocatorProc_Out* out)
 			|	AllocatorQuery_Reset
 			|	AllocatorQuery_Rewind
 			;
-			out->max_alloc = vm->reserve - vm->committed;
-			out->min_alloc = kilo(4);
-			out->left      = out->max_alloc;
+			out->max_alloc  = vm->reserve - vm->committed;
+			out->min_alloc  = kilo(4);
+			out->left       = out->max_alloc;
+			out->save_point = varena_save(vm);
 		break;
 	}
 }
 #pragma endregion VArena
 
 #pragma region Arena (Casey-Ryan Composite Arena)
+inline
 Arena* arena__make(Opts_arena_make* opts) {
 	assert(opts != nullptr);
 	SSIZE header_size = align_pow2(size_of(Arena), MEMORY_ALIGNMENT_DEFAULT);
@@ -1103,6 +1141,7 @@ Slice_Byte arena__push(Arena* arena, SSIZE amount, SSIZE type_width, Opts_arena*
 	slice_assert(vresult);
 	return vresult;
 }
+inline
 void arena_release(Arena* arena) {
 	Arena* curr = arena->current; 
 	Arena* prev = nullptr;
@@ -1127,6 +1166,50 @@ void arena_rewind(Arena* arena, AllocatorSP save_point) {
 	assert(new_pos <= current->pos);
 	curr->pos = new_pos;
 	varena_rewind(curr->backing, (AllocatorSP){varena_allocator_proc, curr->pos});
+}
+inline AllocatorSP arena_save(Arena* arena) { return (AllocatorSP){arena_allocator_proc, arena->current->pos}; };
+void arena_allocator_proc(AllocatorProc_In in, AllocatorProc_Out* out)
+{
+	Arena* arena = cast(Arena*, in.data);
+	switch (in.op)
+	{
+		case AllocatorOp_Alloc_NoZero:
+			out->allocation = arena_push_array(arena, Byte, in.requested_size);
+		break;
+		case AllocatorOp_Alloc:
+			out->allocation = arena_push_array(arena, Byte, in.requested_size);
+			slice_zero(out->allocation);
+		break;
+		case AllocatorOp_Free:
+		break;
+		case AllocatorOp_Reset:
+			arena_rest(arena);
+		break;
+		case AllocatorOp_Grow:
+		case AllocatorOp_Grow_NoZero:
+		case AllocatorOp_Shrink:
+			assert_msg(false, "not implemented");
+		break;
+		case AllocatorOp_Rewind:
+			arena_rewind(arena, * cast(AllocatorSP*, in.old_allocation.ptr));
+		break;
+
+		case AllocatorOp_SavePoint:
+			out->save_point = arena_save(arena);
+		break;
+		case AllocatorOp_Query:
+			out->features = 
+				AllocatorQuery_Alloc
+			// |	AllocatorQuery_Resize
+			|	AllocatorQuery_Reset
+			|	AllocatorQuery_Rewind
+			;
+			out->max_alloc  = arena->backing->reserve;
+			out->min_alloc  = kilo(4);
+			out->left       = out->max_alloc - arena->backing->commit_used;
+			out->save_point = arena_save(arena);
+		break;
+	}
 }
 #pragma endregion Arena
 
@@ -1706,24 +1789,43 @@ void assert_handler( char const* condition, char const* file, char const* functi
 #pragma endregion Debug
 
 #pragma region WATL
-
 void api_watl_lex(WATL_LexInfo* info, Str8 source, Opts_watl_lex* opts)
 {
 	assert(info != nullptr);
 	slice_assert(source);
 	assert(opts != nullptr);
+	S32 max_msgs = opts->max_msgs ? opts->max_msgs : 10;
+	WATL_LexMsg* msg_last = nullptr;
 
-	// Setup a scratch arena, trim it after the lex is complete.
-	// Enforce contiguous on scratch arena.
-	VArena* arena = varena_make();
-
+	enum {
+		a_msg_unspecified  = 1,
+		a_toks_unspecified = 2,
+		a_both_unspecifeid = 3,
+	};
+	AllocatorInfo a_msg  = opts->ainfo_msgs;
+	AllocatorInfo a_toks = opts->ainfo_toks; {
+		S32 alloc_option_status = 0;
+		if (a_msg.proc == nullptr)  { alloc_option_status += a_msg_unspecified; }
+		if (a_toks.proc == nullptr) { alloc_option_status += a_toks_unspecified; }
+		Arena* arena = nullptr;
+		if (alloc_option_status > 0) { arena = arena_make(); }
+		switch (alloc_option_status) {
+			case 0: break;
+			case a_msg_unspecified:  a_msg  = ainfo_arena(arena); break;
+			case a_toks_unspecified: a_toks = ainfo_arena(arena); break;
+			case a_both_unspecifeid: a_msg  = ainfo_arena(arena); a_toks = ainfo_arena(arena); break;
+		}
+	}
+	AllocatorProc_Out start_snapshot; { 
+		a_toks.proc((AllocatorProc_In){.op = AllocatorOp_Query}, & start_snapshot);
+	}
 	UTF8* end    = source.ptr + source.len;
 	UTF8* cursor = source.ptr;
 	UTF8* prev   = source.ptr;
 	UTF8  code   = * cursor;
-
 	B32       was_formatting = true;
 	WATL_Tok* tok            = nullptr;
+	S32       num            = 0;
 	for (; cursor < end;)
 	{
 		switch (code)
@@ -1732,37 +1834,38 @@ void api_watl_lex(WATL_LexInfo* info, Str8 source, Opts_watl_lex* opts)
 			case WATL_Tok_Tab:
 			{
 				if (* prev != * cursor) {
-					tok            = varena_push(arena, WATL_Tok);
+					tok            = alloc_type(a_toks, WATL_Tok);
 					tok->code      = cursor;
 					was_formatting = true;
+					++ num;
 				}
 				cursor += 1;
 			}
 			break;
-
 			case WATL_Tok_LineFeed: {
-					tok            = varena_push(arena, WATL_Tok);
+					tok            = alloc_type(a_toks, WATL_Tok);
 					tok->code      = cursor;
 					cursor        += 1;
 					was_formatting = true; 
+					++ num;
 			}
 			break;
-
 			// Assuming what comes after is line feed.
 			case WATL_Tok_CarriageReturn: {
-					tok            = varena_push(arena, WATL_Tok);
+					tok            = alloc_type(a_toks, WATL_Tok);
 					tok->code      = cursor;
 					cursor        += 2;
 					was_formatting = true; 
+					++ num;
 			}
 			break;
-
 			default:
 			{
 				if (was_formatting) {
-					tok            = varena_push(arena, WATL_Tok);
+					tok            = alloc_type(a_toks, WATL_Tok);
 					tok->code      = cursor;
 					was_formatting = false;
+					++ num;
 				}
 				cursor += 1;
 			}
@@ -1771,10 +1874,22 @@ void api_watl_lex(WATL_LexInfo* info, Str8 source, Opts_watl_lex* opts)
 		prev =  cursor - 1;
 		code = * cursor;
 	}
-	// // info->tokens.ptr = arena.start;
-	// info->tokens.len = arena.used / size_of(WATL_Tok*);	
+	AllocatorProc_Out end_snapshot; { 
+		a_toks.proc((AllocatorProc_In){.op = AllocatorOp_Query}, & end_snapshot);
+	}
+	SSIZE num_bytes = end_snapshot.save_point.slot - start_snapshot.save_point.slot;
+	if (num_bytes <= start_snapshot.left) {
+		WATL_LexMsg* msg = alloc_type(a_msg, WATL_LexMsg);
+		msg->pos     = (WATL_Pos){ -1, -1 };
+		msg->tok     = tok;
+		msg->content = lit("Token slice allocation was not contiguous");
+		info->signal = WATL_LexStatus_MemFail_SliceConstraintFail;
+		sll_queue_push_n(info->msgs, msg_last, msg, next);
+		assert(opts->failon_slice_constraint_fail == false);
+	}
+	info->toks.ptr = tok - num;
+	info->toks.len = num;
 }
-
 #pragma endregion WATL
 
 #pragma endregion Implementation
