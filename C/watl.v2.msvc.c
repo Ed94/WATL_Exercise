@@ -1,6 +1,6 @@
 /*
 WATL Exercise
-Version: 1 (From Scratch, 2-Stage Compilation)
+Version: 2 (From Scratch, 2-Stage Compilation)
 
 Vendor OS & Compiler: Windows 11, MSVC
 */

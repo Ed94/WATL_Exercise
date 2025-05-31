@@ -103,6 +103,7 @@ $compiler_args += $flag_no_optimization
 
 # Debug setup
 $compiler_args += $flag_debug
+$compiler_args += ($flag_define + 'BUILD_DEBUG')
 $compiler_args += ( $flag_path_debug + $path_build + '\' )
 $compiler_args += $flag_link_win_rt_static_debug
 
