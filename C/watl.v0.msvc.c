@@ -40,7 +40,6 @@ enum {
 #define def_struct(symbol)                  struct symbol symbol;   struct symbol
 #define def_union(symbol)                   union  symbol symbol;   union  symbol
 #define fn(symbol)                          symbol
-#define fn_type(symbol, return_type, ...)   return_type (symbol) (__VA_ARGS__)
 #define opt_args(symbol, ...)               &(symbol){__VA_ARGS__}
 #define ret_type(type)                      type
 #define local_persist                       static
@@ -58,8 +57,6 @@ enum {
 #define mega(n)                             (cast(SSIZE, n) << 20)
 #define giga(n)                             (cast(SSIZE, n) << 30)
 #define tera(n)                             (cast(SSIZE, n) << 40)
-
-#define do_for(init, cond, post, body) do { init for (; (cond); (post)) body } while(0)
 
 #define range_iter(type, iter, m_begin, op, m_end)  \
 	tmpl(Iter_Range,type) iter = {                  \
@@ -92,9 +89,9 @@ typedef def_range(SSIZE);
 	if (! (cond))                             \
 	{                                         \
 		assert_handler(                       \
-			stringify(cond),             \
-			__FILE__,                    \
-			__func__,                    \
+			stringify(cond),                  \
+			__FILE__,                         \
+			__func__,                         \
 			cast(S64, __LINE__),              \
 			msg,                              \
 			## __VA_ARGS__);                  \
@@ -530,9 +527,9 @@ Str8Cache str8cache__make(                  Opts_str8cache_init* opts);
 #define str8cache_init(cache, ...) str8cache__init(cache, opt_args(Opts_str8cache_init))
 #define str8cache_make(...)        str8cache__make(       opt_args(Opts_str8cache_init))
 
-void  str8cache_clear(KT1CX_Str8  kt);
-Str8* str8cache_get  (KT1CX_Str8  kt, U64 key);
-Str8* str8cache_set  (KT1CX_Str8* kt, U64 key, Str8 value, AllocatorInfo str_reserve, AllocatorInfo backing_cells);
+void str8cache_clear(KT1CX_Str8  kt);
+Str8 str8cache_get  (KT1CX_Str8  kt, U64 key);
+Str8 str8cache_set  (KT1CX_Str8* kt, U64 key, Str8 value, AllocatorInfo str_reserve, AllocatorInfo backing_cells);
 
 Str8 cache_str8(Str8Cache* cache, Str8 str);
 
@@ -655,6 +652,11 @@ Str8 watl_dump_listing(AllocatorInfo buffer, Slice_WATL_Line lines);
 #pragma region Implementation
 
 #pragma region Memory Operations
+// #include <memory.h>
+void* __cdecl memcpy (void* _Dst, void const* _Src, USIZE _Size);
+void* __cdecl memmove(void* _Dst, void const* _Src, USIZE _Size);
+void* __cdecl memset (void* _Dst, int         _Val, USIZE _Size);
+
 inline
 void* memory_copy(void* restrict dest, void const* restrict src, USIZE length) {
 	if (dest == nullptr || src == nullptr || length == 0) { return nullptr; }
@@ -829,10 +831,8 @@ void farena_allocator_proc(AllocatorProc_In in, AllocatorProc_Out* out)
 	{
 		case AllocatorOp_Alloc:
 		case AllocatorOp_Alloc_NoZero:
-			out->continuity_break = false;
-			out->allocation       = farena__push(arena, in.requested_size, 1, &(Opts_farena){.type_name = lit("Byte"), .alignment = in.alignment});
-			out->left             = arena->used;
-			memory_zero(out->allocation.ptr, out->allocation.len * in.op);
+			out->allocation = farena__push(arena, in.requested_size, 1, &(Opts_farena){.type_name = lit("Byte"), .alignment = in.alignment});
+			memory_zero(out->allocation.ptr, out->allocation.len * cast(SSIZE, in.op));
 		break;
 
 		case AllocatorOp_Free:
@@ -997,14 +997,16 @@ Slice_Byte varena__push(VArena* vm, SSIZE amount, SSIZE type_width, Opts_varena*
 	SSIZE aligned_size   = align_pow2(requested_size, alignment);
 	SSIZE current_offset = vm->reserve_start + vm->commit_used;
 	SSIZE to_be_used     = vm->commit_used   + aligned_size;
-	SSIZE reserve_left   = vm->reserve       - vm->committed;
-	assert(to_be_used < reserve_left);
+	SSIZE reserve_left   = vm->reserve       - current_offset;
 	SSIZE header_offset  = vm->reserve_start - cast(SSIZE, vm);
 	SSIZE commit_left    = vm->committed - vm->commit_used - header_offset;
 	B32   exhausted      = commit_left < to_be_used;
+	assert(to_be_used < reserve_left);
 	if (exhausted)
 	{
-		SSIZE next_commit_size = reserve_left > 0 ? max(vm->commit_size, to_be_used) : cast(SSIZE, align_pow2( abs(reserve_left), os_system_info()->target_page_size));
+		SSIZE next_commit_size = reserve_left > 0 ? 
+			max(vm->commit_size, to_be_used) 
+		:	cast(SSIZE, align_pow2( reserve_left, os_system_info()->target_page_size));
 		if (next_commit_size) {
 			Byte* next_commit_start = cast(Byte*, cast(SSIZE, vm) + vm->committed);
 			B32   no_large_pages    = (vm->flags & VArenaFlag_NoLargePages) != 0;
@@ -1015,6 +1017,7 @@ Slice_Byte varena__push(VArena* vm, SSIZE amount, SSIZE type_width, Opts_varena*
 			vm->committed += next_commit_size;
 		}
 	}
+	vm->commit_used += to_be_used;
 	return (Slice_Byte){.ptr = cast(Byte*, current_offset), .len = requested_size};
 }
 inline void varena_release(VArena* arena) { os_vmem_release(arena, arena->reserve); }
@@ -1032,8 +1035,8 @@ void varena_allocator_proc(AllocatorProc_In in, AllocatorProc_Out* out)
 	{
 		case AllocatorOp_Alloc:
 		case AllocatorOp_Alloc_NoZero:
-			out->allocation = varena_push_array(vm, Byte, in.requested_size);
-			memory_zero(out->allocation.ptr, out->allocation.len * in.op);
+			out->allocation = varena_push_array(vm, Byte, in.requested_size, .alignment = in.alignment);
+			memory_zero(out->allocation.ptr, out->allocation.len * cast(SSIZE, in.op));
 		break;
 
 		case AllocatorOp_Free:
@@ -1106,7 +1109,8 @@ Arena* arena__make(Opts_arena_make* opts) {
 	return arena;
 }
 Slice_Byte arena__push(Arena* arena, SSIZE amount, SSIZE type_width, Opts_arena* opts) {
-	assert(opts != nullptr);
+	assert(arena != nullptr);
+	assert(opts  != nullptr);
 	Arena* active        = arena->current;
 	SSIZE size_requested = amount * type_width;
 	SSIZE alignment      = opts->alignment ? opts->alignment : MEMORY_ALIGNMENT_DEFAULT;
@@ -1128,15 +1132,15 @@ Slice_Byte arena__push(Arena* arena, SSIZE amount, SSIZE type_width, Opts_arena*
 		sll_stack_push_n(arena->current, new_arena, prev);
 		active = arena->current;
 	}
-	Byte*      result  = cast(Byte*, active->pos + pos_pre);
 	Slice_Byte vresult = varena_push_array(active->backing, Byte, size_aligned, .alignment = alignment);
-	active->pos = pos_pst;
-	assert(result  == vresult.ptr);
 	slice_assert(vresult);
+	assert(cast(Byte*, pos_pst) == vresult.ptr);
+	active->pos = pos_pst;
 	return vresult;
 }
 inline
 void arena_release(Arena* arena) {
+	assert(arena != nullptr);
 	Arena* curr = arena->current; 
 	Arena* prev = nullptr;
 	for (; curr != nullptr;	curr = prev) {
@@ -1146,7 +1150,7 @@ void arena_release(Arena* arena) {
 }
 inline void arena_reset(Arena* arena) { arena_rewind(arena, (AllocatorSP){.type_sig = arena_allocator_proc, .slot = 0}); }
 void arena_rewind(Arena* arena, AllocatorSP save_point) {
-	assert(arena);
+	assert(arena != nullptr);
 	assert(save_point.type_sig == arena_allocator_proc);
 	SSIZE header_size = align_pow2(size_of(Arena), MEMORY_ALIGNMENT_DEFAULT);
 	Arena*  curr    = arena->current;	
@@ -1165,13 +1169,15 @@ void arena_rewind(Arena* arena, AllocatorSP save_point) {
 inline AllocatorSP arena_save(Arena* arena) { return (AllocatorSP){arena_allocator_proc, arena->current->pos}; };
 void arena_allocator_proc(AllocatorProc_In in, AllocatorProc_Out* out)
 {
+	assert(out != nullptr);
 	Arena* arena = cast(Arena*, in.data);
+	assert(arena != nullptr);
 	switch (in.op)
 	{
 		case AllocatorOp_Alloc:
 		case AllocatorOp_Alloc_NoZero:
-			out->allocation = arena_push_array(arena, Byte, in.requested_size);
-			memory_zero(out->allocation.ptr, out->allocation.len * in.op);
+			out->allocation       = arena_push_array(arena, Byte, in.requested_size, .alignment = in.alignment);
+			memory_zero(out->allocation.ptr, out->allocation.len * cast(SSIZE, in.op));
 		break;
 		case AllocatorOp_Free:
 		break;
@@ -1284,7 +1290,8 @@ Slice_Byte kt1cx__get(KT1CX_Byte kt, U64 key, KT1CX_ByteMeta m) {
 		process_slots:
 			KT1CX_Byte_Slot* slot = cast(KT1CX_Byte_Slot*, slot_cursor + m.slot_key_offset);
 			if (slot->occupied && slot->key == key) {
-				return (Slice_Byte){slot_cursor, m.type_width};
+				Slice_Byte slot_value = {slot_cursor, m.type_width};
+				return slot_value;
 			}
 		}
 		Byte* next = slot_cursor + m.cell_next_offset;
@@ -1294,7 +1301,7 @@ Slice_Byte kt1cx__get(KT1CX_Byte kt, U64 key, KT1CX_ByteMeta m) {
 			goto process_slots;
 		}
 		else {
-			return (Slice_Byte){};
+			return (Slice_Byte){0};
 		}
 	}
 }
@@ -1329,12 +1336,12 @@ Slice_Byte kt1cx__set(KT1CX_Byte* kt, U64 key, Slice_Byte value, AllocatorInfo b
 			KT1CX_Byte_Slot* slot = cast(KT1CX_Byte_Slot*, cell.ptr + m.slot_key_offset);
 			slot->occupied = true;
 			slot->key      = key;
-			Slice_Byte slot_value = {slot_cursor, m.type_width};
+			Slice_Byte slot_value = {cell.ptr, m.type_width};
 			return slot_value;
 		}
 	}
 	assert_msg(false, "impossible path");
-	return (Slice_Byte){};
+	return (Slice_Byte){0};
 }
 #pragma endregion Key Table
 
@@ -1350,15 +1357,13 @@ Str8 str8_from_u32(AllocatorInfo ainfo, U32 num, U32 radix, U8 min_digits, U8 di
 {
 	Str8 result = {0};
 	Str8 prefix = {0};
-	switch (radix)
-	{
+	switch (radix) {
 		case 16: { prefix = lit("0x"); } break;
 		case 8:  { prefix = lit("0o"); } break;
 		case 2:  { prefix = lit("0b"); } break;
 	}
 	U8 digit_group_size = 3;
-	switch (radix)
-	{
+	switch (radix) {
 		default: break;
 		case 2:
 		case 8:
@@ -1381,17 +1386,15 @@ Str8 str8_from_u32(AllocatorInfo ainfo, U32 num, U32 radix, U8 min_digits, U8 di
 				needed_digits += 1;
 			}
 		}
-
 		    needed_leading_zeros = (min_digits > needed_digits) ? min_digits - needed_digits : 0;
 		U32 needed_separators    = 0;
-		if (digit_group_separator != 0)
+		if (digit_group_separator != 0) 
 		{
 			needed_separators = (needed_digits + needed_leading_zeros) / digit_group_size;
 			if (needed_separators > 0 && (needed_digits + needed_leading_zeros) % digit_group_size == 0) {
 				needed_separators -= 1;
 			}
 		}
-		
 		result = alloc_slice(ainfo, UTF8, prefix.len + needed_leading_zeros + needed_separators + needed_digits);
 		slice_assert(result);
 	}
@@ -1431,12 +1434,10 @@ Str8 str8__fmt_kt1l(AllocatorInfo ainfo, Slice_Byte buffer, KT1L_Str8 table, Str
 	slice_assert(table);
 	slice_assert(fmt_template);
 	assert(ainfo.proc != nullptr ? (allocator_query(ainfo) & AllocatorQuery_Grow) != 0 : true);
-
 	UTF8* cursor_buffer    = buffer.ptr;
 	SSIZE buffer_remaining = buffer.len;
 
-	char curr_code = * fmt_template.ptr;
-
+	char  curr_code  = * fmt_template.ptr;
 	UTF8* cursor_fmt = fmt_template.ptr;
 	SSIZE left_fmt   = fmt_template.len;
 	while (left_fmt && buffer_remaining)
@@ -1557,7 +1558,7 @@ void str8cache_clear(KT1CX_Str8 kt) {
 	});
 }
 inline
-Str8* str8cache_get(KT1CX_Str8 kt, U64 key) {
+Str8 str8cache_get(KT1CX_Str8 kt, U64 key) {
 	Slice_Byte result = kt1cx__get(pcast(KT1CX_Byte, kt), key
 	,	(KT1CX_ByteMeta){
 		.slot_size        = size_of(KT1CX_Slot_Str8),
@@ -1568,10 +1569,14 @@ Str8* str8cache_get(KT1CX_Str8 kt, U64 key) {
 		.type_width       = size_of(Str8),
 		.type_name        = lit(stringify(Str8))
 	});
-	return cast(Str8*, result.ptr);
+	return pcast(Str8, result);
 }
 inline
-Str8* str8cache_set(KT1CX_Str8* kt, U64 key, Str8 value, AllocatorInfo str_reserve, AllocatorInfo backing_cells) {
+Str8 str8cache_set(KT1CX_Str8* kt, U64 key, Str8 value, AllocatorInfo str_reserve, AllocatorInfo backing_cells) {
+	assert(kt != nullptr);
+	assert(str_reserve.proc != nullptr);
+	assert(backing_cells.proc != nullptr);
+	slice_assert(value);
 	Slice_Byte entry = kt1cx__set(pcast(KT1CX_Byte*, kt), key, slice_byte(value), backing_cells, (KT1CX_ByteMeta){
 		.slot_size        = size_of(KT1CX_Slot_Str8),
 		.slot_key_offset  = offset_of(KT1CX_Slot_Str8, key),
@@ -1581,19 +1586,20 @@ Str8* str8cache_set(KT1CX_Str8* kt, U64 key, Str8 value, AllocatorInfo str_reser
 		.type_width       = size_of(Str8),
 		.type_name        = lit(stringify(Str8))
 	});
-	Str8* result = pcast(Str8*, entry.ptr);
-	if (result->ptr == nullptr && result->len == 0) {
-		* result = alloc_slice(str_reserve, UTF8, value.len);
+	slice_assert(entry);
+	Str8 result  = { entry.ptr, 0 };
+	B32 is_empty = (result.ptr == nullptr) && (result.len == 0);
+	if (is_empty) {
+		result = alloc_slice(str_reserve, UTF8, value.len);
+		slice_copy(result, value);
 	}
-	slice_assert(* result);
 	return result;
 }
 inline
 Str8 cache_str8(Str8Cache* cache, Str8 str) {
-	U64 key = 0; hash64_djb8(& key, slice_byte(str));
-	Str8* result = str8cache_set(& cache->kt, key, str, cache->str_reserve, cache->cell_reserve);
-	assert(result != nullptr);
-	return * result;
+	U64    key    = 0; hash64_djb8(& key, slice_byte(str));
+	Str8   result = str8cache_set(& cache->kt, key, str, cache->str_reserve, cache->cell_reserve);
+	return result;
 }
 
 inline
