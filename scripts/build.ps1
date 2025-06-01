@@ -83,7 +83,7 @@ $compiler_args += $flag_c11
 $compiler_args += $flag_exceptions_disabled
 $compiler_args += $flag_RTTI_disabled
 $compiler_args += $flag_preprocess_conform
-$compiler_args += $flag_sanitize_address
+# $compiler_args += $flag_sanitize_address
 
 $compiler_args += $flag_wall
 

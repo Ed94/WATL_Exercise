@@ -40,6 +40,8 @@ enum {
 #define stringify(S)                        stringify_impl(S)
 #define tmpl(prefix, type)                  prefix ## _ ## type
 
+#define alignas                             _Alignas
+#define alignof                             _Alignof
 #define byte_pad(amount, ...)               Byte glue(_PAD_, __VA_ARGS__) [amount]
 #define farray_len(array)                   (SSIZE)sizeof(array) / size_of( typeof((array)[0]))
 #define farray_init(type, ...)              (type[]){__VA_ARGS__}
@@ -251,10 +253,20 @@ typedef def_struct(AllocatorInfo) {
 	void*          data;
 };
 static_assert(size_of(AllocatorSP) <= size_of(Slice_Byte));
+typedef def_struct(AllocatorQueryInfo) {
+	AllocatorSP         save_point;
+	AllocatorQueryFlags features;
+	SSIZE               left; // Contiguous memory left
+	SSIZE               max_alloc;
+	SSIZE               min_alloc;
+	B32                 continuity_break; // Whether this allocation broke continuity with the previous (address space wise)
+	byte_pad(4);
+};
+static_assert(size_of(AllocatorProc_Out) == size_of(AllocatorQueryInfo));
 
 #define MEMORY_ALIGNMENT_DEFAULT (2 * size_of(void*))
 
-AllocatorQueryFlags allocator_query(AllocatorInfo ainfo);
+AllocatorQueryInfo allocator_query(AllocatorInfo ainfo);
 
 void        mem_free      (AllocatorInfo ainfo, Slice_Byte mem);
 void        mem_reset     (AllocatorInfo ainfo);
@@ -358,7 +370,7 @@ void        varena_reset  (VArena* arena);
 AllocatorSP varena_save   (VArena* arena);
 
 void varena_allocator_proc(AllocatorProc_In in, AllocatorProc_Out* out); 
-#define ainfo_varena(varena) (AllocatorInfo) { .proc = varena_allocator_proc, .data = varena }
+#define ainfo_varena(varena) (AllocatorInfo) { .proc = & varena_allocator_proc, .data = varena }
 
 #define varena_push(arena, type, ...) \
 cast(type*, varena__push(arena, 1, size_of(type), opt_args(Opts_varena, lit(stringify(type)), __VA_ARGS__) ).ptr)
@@ -391,7 +403,7 @@ void        arena_rewind (Arena* arena, AllocatorSP save_point);
 AllocatorSP arena_save   (Arena* arena);
 
 void arena_allocator_proc(AllocatorProc_In in, AllocatorProc_Out* out);
-#define ainfo_arena(arena) (AllocatorInfo){ .proc = arena_allocator_proc, .data = arena }
+#define ainfo_arena(arena) (AllocatorInfo){ .proc = & arena_allocator_proc, .data = arena }
 
 #define arena_make(...) arena__make(opt_args(Opts_arena_make, __VA_ARGS__))
 
@@ -607,9 +619,11 @@ typedef def_enum(U32, WATL_TokKind) {
 	WATL_Tok_LineFeed       = '\n',
 	WATL_Tok_Text           = 0xFFFFFFFF,
 };
-typedef def_struct(WATL_Tok) {
-	UTF8* code;
-};
+typedef Str8 WATL_Tok;
+// typedef def_struct(WATL_Tok) {
+// 	UTF8* code;
+// 	byte_pad(8);
+// };
 typedef def_Slice(WATL_Tok);
 typedef def_enum(U32, WATL_LexStatus) {
 	WATL_LexStatus_MemFail_SliceConstraintFail = (1 << 0),
@@ -732,9 +746,10 @@ void slice__copy(Slice_Byte dest, SSIZE dest_typewidth, Slice_Byte src, SSIZE sr
 
 #pragma region Allocator Interface
 inline
-AllocatorQueryFlags allocator_query(AllocatorInfo ainfo) { 
+AllocatorQueryInfo allocator_query(AllocatorInfo ainfo) { 
 	assert(ainfo.proc != nullptr);
-	AllocatorProc_Out out; ainfo.proc((AllocatorProc_In){ .data = ainfo.data, .op = AllocatorOp_Query}, & out); return out.features;
+	AllocatorQueryInfo out; ainfo.proc((AllocatorProc_In){ .data = ainfo.data, .op = AllocatorOp_Query}, (AllocatorProc_Out*)& out); 
+	return out;
 }
 
 inline
@@ -994,17 +1009,20 @@ void os_init(void) {
 	OS_SystemInfo* info = & os__windows_info.system_info;
 	info->target_page_size = (SSIZE)GetLargePageMinimum();
 }
+
+// TODO(Ed): Large pages disabled for now...
 inline Byte* os__vmem_reserve(SSIZE size, Opts_vmem* opts) { 
 	assert(opts != nullptr);
 	void* result = VirtualAlloc(cast(void*, opts->base_addr), size
-		,	MS_MEM_RESERVE|MS_MEM_COMMIT|(opts->no_large_pages == false ? MS_MEM_LARGE_PAGES : 0)
+		,	MS_MEM_RESERVE|MS_MEM_COMMIT
+		// |(opts->no_large_pages == false ? MS_MEM_LARGE_PAGES : 0)
 		,	MS_PAGE_READWRITE
 	); 
 	return result; 
 }
 inline B32 os__vmem_commit(void* vm, SSIZE size, Opts_vmem* opts) { 
 	assert(opts != nullptr);
-	if (opts->no_large_pages == false ) { return 1; }
+	// if (opts->no_large_pages == false ) { return 1; }
 	B32 result = (VirtualAlloc(vm, size, MS_MEM_COMMIT, MS_PAGE_READWRITE) != 0); 
 	return result;
 }
@@ -1029,7 +1047,7 @@ VArena* varena__make(Opts_varena_make* opts) {
 		.reserve       = reserve_size,
 		.commit_size   = commit_size,
 		.committed     = commit_size,
-		.commit_used   = 0,
+		.commit_used   = header_size,
 		.flags         = opts->flags
 	};
 	return vm;
@@ -1041,9 +1059,8 @@ Slice_Byte varena__push(VArena* vm, SSIZE amount, SSIZE type_width, Opts_varena*
 	SSIZE aligned_size   = align_pow2(requested_size, alignment);
 	SSIZE current_offset = vm->reserve_start + vm->commit_used;
 	SSIZE to_be_used     = vm->commit_used   + aligned_size;
-	SSIZE reserve_left   = vm->reserve       - current_offset;
-	SSIZE header_offset  = vm->reserve_start - cast(SSIZE, vm);
-	SSIZE commit_left    = vm->committed - vm->commit_used - header_offset;
+	SSIZE reserve_left   = vm->reserve       - vm->commit_used;
+	SSIZE commit_left    = vm->committed - vm->commit_used;
 	B32   exhausted      = commit_left < to_be_used;
 	assert(to_be_used < reserve_left);
 	if (exhausted)
@@ -1166,7 +1183,7 @@ Slice_Byte arena__push(Arena* arena, SSIZE amount, SSIZE type_width, Opts_arena*
 	SSIZE alignment      = opts->alignment ? opts->alignment : MEMORY_ALIGNMENT_DEFAULT;
 	SSIZE size_aligned   = align_pow2(size_requested, alignment);
 	SSIZE pos_pre        = active->pos;
-	SSIZE pos_pst        = pos_pre + size_requested;
+	SSIZE pos_pst        = pos_pre + size_aligned;
 	B32 should_chain = 
 		((arena->flags & ArenaFlag_NoChain) == 0)
 	&&	active->backing->reserve < pos_pst;	
@@ -1182,9 +1199,10 @@ Slice_Byte arena__push(Arena* arena, SSIZE amount, SSIZE type_width, Opts_arena*
 		sll_stack_push_n(arena->current, new_arena, prev);
 		active = arena->current;
 	}
+	Byte*      result  = cast(Byte*, active) + pos_pre;
 	Slice_Byte vresult = varena_push_array(active->backing, Byte, size_aligned, .alignment = alignment);
 	slice_assert(vresult);
-	assert(cast(Byte*, pos_pst) == vresult.ptr);
+	assert(result == vresult.ptr);
 	active->pos = pos_pst;
 	return vresult;
 }
@@ -1215,7 +1233,7 @@ void arena_rewind(Arena* arena, AllocatorSP save_point) {
 	curr->pos = new_pos;
 	varena_rewind(curr->backing, (AllocatorSP){varena_allocator_proc, curr->pos});
 }
-inline AllocatorSP arena_save(Arena* arena) { return (AllocatorSP){arena_allocator_proc, arena->current->pos}; };
+inline AllocatorSP arena_save(Arena* arena) { return (AllocatorSP){arena_allocator_proc, arena->base_pos + arena->current->pos}; };
 void arena_allocator_proc(AllocatorProc_In in, AllocatorProc_Out* out)
 {
 	assert(out != nullptr);
@@ -1484,7 +1502,7 @@ Str8 str8__fmt_kt1l(AllocatorInfo ainfo, Slice_Byte buffer, KT1L_Str8 table, Str
 	slice_assert(buffer);
 	slice_assert(table);
 	slice_assert(fmt_template);
-	assert(ainfo.proc != nullptr ? (allocator_query(ainfo) & AllocatorQuery_Grow) != 0 : true);
+	assert(ainfo.proc != nullptr ? (allocator_query(ainfo).features & AllocatorQuery_Grow) != 0 : true);
 	UTF8* cursor_buffer    = buffer.ptr;
 	SSIZE buffer_remaining = buffer.len;
 
@@ -1646,13 +1664,13 @@ Str8 str8cache_set(KT1CX_Str8 kt, U64 key, Str8 value, AllocatorInfo str_reserve
 		.type_name        = lit(stringify(Str8))
 	});
 	slice_assert(entry);
-	Str8 result  = { entry.ptr, 0 };
-	B32 is_empty = (result.ptr == nullptr) && (result.len == 0);
+	Str8* result  = pcast(Str8*, entry.ptr);
+	B32 is_empty = (result->len == 0);
 	if (is_empty) {
-		result = alloc_slice(str_reserve, UTF8, value.len);
-		slice_copy(result, value);
+		* result = alloc_slice(str_reserve, UTF8, value.len);
+		slice_copy(* result, value);
 	}
-	return result;
+	return * result;
 }
 inline
 Str8 cache_str8(Str8Cache* cache, Str8 str) {
@@ -1733,8 +1751,8 @@ __declspec(dllimport) MS_DWORD __stdcall GetLastError(void);
 inline
 FileOpInfo file__read_contents(Str8 path, Opts_read_file_contents* opts) {
 	slice_assert(path);
-    assert(opts != nullptr);
-	FileOpInfo result; api_file_read_contents(& result, path, * opts);
+	assert(opts != nullptr);
+	FileOpInfo result = {0}; api_file_read_contents(& result, path, * opts);
 	return result;
 }
 void api_file_read_contents(FileOpInfo* result, Str8 path, Opts_read_file_contents opts)
@@ -1893,67 +1911,69 @@ void api_watl_lex(WATL_LexInfo* info, Str8 source, Opts_watl_lex* opts)
 	assert(opts != nullptr);
 	assert(opts->ainfo_msgs.proc != nullptr);
 	assert(opts->ainfo_toks.proc != nullptr);
-	AllocatorProc_Out start_snapshot; {  opts->ainfo_toks.proc((AllocatorProc_In){.op = AllocatorOp_Query}, & start_snapshot); }
+	AllocatorQueryInfo start_snapshot = allocator_query(opts->ainfo_toks);
 	WATL_LexMsg* msg_last = nullptr;
 
 	UTF8* end    = source.ptr + source.len;
 	UTF8* cursor = source.ptr;
-	UTF8* prev   = source.ptr - 1;
+	UTF8* prev   = cursor - 1;
 	UTF8  code   = * cursor;
 	B32       was_formatting = true;
 	WATL_Tok* tok            = nullptr;
 	S32       num            = 0;
 	for (; cursor < end;)
 	{
+	#define alloc_tok() alloc_type(opts->ainfo_toks, WATL_Tok, .alignment = alignof(WATL_Tok))
 		switch (code)
 		{
 			case WATL_Tok_Space:
 			case WATL_Tok_Tab:
 			{
 				if (* prev != * cursor) {
-					tok            = alloc_type(opts->ainfo_toks, WATL_Tok);
-					tok->code      = cursor;
+					tok            = alloc_tok();
+					* tok          = (WATL_Tok){ cursor, 0 };
 					was_formatting = true;
 					++ num;
 				}
-				cursor += 1;
+				cursor   += 1;
+				tok->len += 1;
 			}
 			break;
 			case WATL_Tok_LineFeed: {
-					tok            = alloc_type(opts->ainfo_toks, WATL_Tok);
-					tok->code      = cursor;
-					cursor        += 1;
-					was_formatting = true; 
-					++ num;
+				tok            = alloc_tok();
+				* tok          = (WATL_Tok){ cursor, 1 };
+				cursor        += 1;
+				was_formatting = true; 
+				++ num;
 			}
 			break;
 			// Assuming what comes after is line feed.
 			case WATL_Tok_CarriageReturn: {
-					tok            = alloc_type(opts->ainfo_toks, WATL_Tok);
-					tok->code      = cursor;
-					cursor        += 2;
-					was_formatting = true; 
-					++ num;
+				tok            = alloc_tok();
+				* tok          = (WATL_Tok){ cursor, 2 };
+				cursor        += 2;
+				was_formatting = true; 
+				++ num;
 			}
 			break;
 			default:
 			{
 				if (was_formatting) {
-					tok            = alloc_type(opts->ainfo_toks, WATL_Tok);
-					tok->code      = cursor;
+					tok            = alloc_tok();
+					* tok          = (WATL_Tok){ cursor, 0 };
 					was_formatting = false;
 					++ num;
 				}
-				cursor += 1;
+				cursor   += 1;
+				tok->len += 1;
 			}
 			break;
 		}
 		prev =  cursor - 1;
 		code = * cursor;
+	#undef alloc_tok
 	}
-	AllocatorProc_Out end_snapshot; { 
-		opts->ainfo_toks.proc((AllocatorProc_In){.op = AllocatorOp_Query}, & end_snapshot);
-	}
+	AllocatorQueryInfo end_snapshot = allocator_query(opts->ainfo_toks);
 	SSIZE num_bytes = end_snapshot.save_point.slot - start_snapshot.save_point.slot;
 	if (num_bytes > start_snapshot.left) {
 		info->signal |= WATL_LexStatus_MemFail_SliceConstraintFail;
@@ -1967,25 +1987,10 @@ void api_watl_lex(WATL_LexInfo* info, Str8 source, Opts_watl_lex* opts)
 	}
 	assert(tok != nullptr);
 	assert(num > 0);
-	info->toks.ptr = tok - num;
+	info->toks.ptr = tok - num + 1;
 	info->toks.len = num;
 }
 WATL_LexInfo watl__lex(Str8 source, Opts_watl_lex* opts) { WATL_LexInfo info = {0}; api_watl_lex(& info, source, opts); return info; }
-
-Str8 str8_from_watl_tok(Slice_WATL_Tok toks, WATL_Tok* tok) {
-	SSIZE start    = cast(SSIZE, toks.ptr->code);
-	SSIZE curr     = cast(SSIZE, tok->code);
-	SSIZE offset   = curr - start;
-	SSIZE left     = cast(SSIZE, toks.ptr + toks.len) - offset;
-	B32   last_tok = tok == & toks.ptr[toks.len - 1]; // Check to see if this token's end is also the end of the slice:
-	Str8  text     = {0};
-	text.ptr = tok->code;
-	text.len = last_tok ? 
-		left
-	// Othwerise its the next minus the curr.
-	:	cast(SSIZE, (tok + 1)->code - tok->code);
-	return text;
-}
 
 void api_watl_parse(WATL_ParseInfo* info, Slice_WATL_Tok tokens, Opts_watl_parse* opts)
 {
@@ -1995,8 +2000,8 @@ void api_watl_parse(WATL_ParseInfo* info, Slice_WATL_Tok tokens, Opts_watl_parse
 	assert(opts->ainfo_msgs.proc != nullptr);
 	assert(opts->ainfo_nodes.proc != nullptr);
 	assert(opts->str_cache != nullptr);
-	AllocatorProc_Out start_lines_snapshot; { opts->ainfo_lines.proc((AllocatorProc_In){.op = AllocatorOp_Query}, & start_lines_snapshot); }
-	AllocatorProc_Out start_nodes_snapshot; { opts->ainfo_nodes.proc((AllocatorProc_In){.op = AllocatorOp_Query}, & start_nodes_snapshot); }
+	AllocatorQueryInfo start_lines_snapshot = allocator_query(opts->ainfo_lines);
+	AllocatorQueryInfo start_nodes_snapshot = allocator_query(opts->ainfo_nodes);
 	WATL_ParseMsg* msg_last = nullptr;
 
 	WATL_Line* line = alloc_type(opts->ainfo_lines, WATL_Line);
@@ -2006,12 +2011,12 @@ void api_watl_parse(WATL_ParseInfo* info, Slice_WATL_Tok tokens, Opts_watl_parse
 	info->lines = (Slice_WATL_Line){ line, 0 };
 	for (slice_iter(tokens, token))
 	{
-		switch(* token->code)
+		switch(* token->ptr)
 		{
 			case WATL_Tok_CarriageReturn:
 			case WATL_Tok_LineFeed:
 			{
-				AllocatorProc_Out end_nodes_snapshot; { opts->ainfo_nodes.proc((AllocatorProc_In){.op = AllocatorOp_Query}, & end_nodes_snapshot); }
+				AllocatorQueryInfo end_nodes_snapshot = allocator_query(opts->ainfo_nodes);
 				SSIZE distance_nodes = end_nodes_snapshot.save_point.slot - start_nodes_snapshot.save_point.slot;
 				if (distance_nodes > start_lines_snapshot.left) {
 					info->signal |= WATL_ParseStatus_MemFail_SliceConstraintFail;
@@ -2023,7 +2028,6 @@ void api_watl_parse(WATL_ParseInfo* info, Slice_WATL_Tok tokens, Opts_watl_parse
 					sll_queue_push_n(info->msgs, msg_last, msg, next);
 					assert(opts->failon_slice_constraint_fail == false);
 				}
-				opts->ainfo_nodes.proc((AllocatorProc_In){.op = AllocatorOp_Query}, & start_nodes_snapshot);
 				WATL_Line* new_line = alloc_type(opts->ainfo_lines, WATL_Line);
 				line             = new_line;
 				line->ptr        = curr;
@@ -2035,14 +2039,13 @@ void api_watl_parse(WATL_ParseInfo* info, Slice_WATL_Tok tokens, Opts_watl_parse
 			default:
 			break;
 		}
-		Str8 tok_str = str8_from_watl_tok(tokens, token);
-		* curr       = cache_str8(opts->str_cache, tok_str);
+		* curr       = cache_str8(opts->str_cache, * token);
 		curr         = alloc_type(opts->ainfo_nodes, WATL_Node);
 		* curr       = (WATL_Node){0};
 		line->len   += 1;
 		continue;
 	}
-	AllocatorProc_Out end_lines_snapshot; { opts->ainfo_lines.proc((AllocatorProc_In){.op = AllocatorOp_Query}, & end_lines_snapshot); }
+	AllocatorQueryInfo end_lines_snapshot = allocator_query(opts->ainfo_lines);
 
 	SSIZE distance_lines = end_lines_snapshot.save_point.slot - start_lines_snapshot.save_point.slot;
 	if (distance_lines > start_lines_snapshot.left) {
