@@ -11,6 +11,7 @@ if ($IsWindows) {
 # https://learn.microsoft.com/en-us/cpp/build/reference/compiler-options-listed-by-category?view=msvc-170
 $flag_all_c                        = '/TC'
 $flag_c11                          = '/std:c11'
+$flag_c23                          = '/std:c23'
 $flag_all_cpp                      = '/TP'
 $flag_compile                      = '/c'
 $flag_charset_utf8                 = '/utf-8'
@@ -84,7 +85,14 @@ $compiler_args += $flag_RTTI_disabled
 $compiler_args += $flag_preprocess_conform
 $compiler_args += $flag_sanitize_address
 
+$compiler_args += $flag_wall
+
 # Set charset encoding for both execution and source to UTF-8
+$compiler_args += $flag_charset_utf8
+
+# Specifing output pathing
+$compiler_args += ( $flag_path_interm + $path_build + '\' )
+$compiler_args += ( $flag_path_output + $path_build + '\' )
 
 # Dump preprocess file
 if ($false) {
@@ -95,15 +103,12 @@ if ($false) {
 # Diagnostic logging
 $compiler_args += $flag_full_src_path
 
-# Specifing output pathing
-$compiler_args += ( $flag_path_interm + $path_build + '\' )
-$compiler_args += ( $flag_path_output + $path_build + '\' )
-
-$compiler_args += $flag_no_optimization
+$compiler_args += $flag_optimize_intrinsics
+# $compiler_args += $flag_no_optimization
 
 # Debug setup
-$compiler_args += $flag_debug
 $compiler_args += ($flag_define + 'BUILD_DEBUG')
+$compiler_args += $flag_debug
 $compiler_args += ( $flag_path_debug + $path_build + '\' )
 $compiler_args += $flag_link_win_rt_static_debug
 
@@ -117,9 +122,6 @@ $compiler_args += $flag_compile, $unit
 # Diagnoistc print for the args
 $compiler_args | ForEach-Object { Write-Host $_ }
 write-host
-
-# $compiler_args += ( $flag_define + 'DEMO_STR_SLICE' )
-# $compiler_args += ( $flag_define + 'DEMO__FILE_READ_CONTENTS_V1' )
 
 # Compile the unit
 & $compiler $compiler_args
