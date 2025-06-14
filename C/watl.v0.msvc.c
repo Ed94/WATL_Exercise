@@ -1378,19 +1378,17 @@ SSIZE kt1l__populate_slice_a2(KT1L_Byte* kt, KT1L_Info info, Slice_Byte values, 
 	slice_assert(* kt);
 	SSIZE num_bytes = 0;
 	for (range_iter(SSIZE, iter, 0, <, num_values)) {
-		SSIZE slot_offset = iter.cursor * info.slot_size;
-		Byte* slot_cursor = & kt->ptr[slot_offset];
-		Byte* a2_cursor   = & values.ptr[iter.cursor * info.type_width * 2];
-
-		U64*       slot_key   = (U64*)slot_cursor;
-		Slice_Byte slot_value = { slot_cursor + info.kt_value_offset, info.type_width };
-
-		Slice_Byte a2_key   = { a2_cursor,                   info.type_width };
-		Slice_Byte a2_value = { a2_cursor + info.type_width, info.type_width };
-		slice_copy(slot_value, a2_value);
-		* slot_key = 0; hash64_djb8(slot_key,  a2_key);
-
-		num_bytes += slot_value.len;
+		SSIZE      slot_offset = iter.cursor * info.slot_size;                            // slot id
+		Byte*      slot_cursor = & kt->ptr[slot_offset];                                  // slots[id]            type: KT1L_<Type>
+		U64*       slot_key    = (U64*)slot_cursor;                                       // slots[id].key        type: U64
+		Slice_Byte slot_value  = { slot_cursor + info.kt_value_offset, info.type_width }; // slots[id].value      type: <Type>
+		SSIZE      a2_offset   = iter.cursor * info.type_width * 2;                       // a2 entry id
+		Byte*      a2_cursor   = & values.ptr[a2_offset];                                 // a2_entries[id]       type: A2_<Type>
+		Slice_Byte a2_key      = * cast(Slice_Byte*, a2_cursor);                          // a2_entries[id].key   type: <Type>
+		Slice_Byte a2_value    = { a2_cursor + info.type_width, info.type_width };        // a2_entries[id].value type: <Type>
+		slice_copy(slot_value, a2_value);                                                 // slots[id].value = a2_entries[id].value
+		* slot_key = 0; hash64_djb8(slot_key,  a2_key);                                   // slots[id].key   = hash64_djb8(a2_entries[id].key)
+		num_bytes += cast(Slice_Byte*, a2_value.ptr)->len;                                // num_bytes      += a2_entries[id].value.len
 	}
 	kt->len = num_values;
 	return num_bytes;
@@ -1409,54 +1407,55 @@ void kt1cx__init(KT1CX_Info info, KT1CX_Byte* result) {
 	assert(info.type_width         >  0);
 	result->table     = mem_alloc(info.backing_table, info.table_size * info.cell_size);
 	result->cell_pool = mem_alloc(info.backing_cells, info.cell_size  * info.cell_pool_size);
-	result->table.len = info.table_size;
+	result->table.len = info.table_size; // Setting to the table number of elements instead of byte length.
 }
 void kt1cx__clear(KT1CX_Byte kt, KT1CX_ByteMeta m) {
 	Byte* cursor    = kt.table.ptr;
 	SSIZE num_cells = kt.table.len;
-	kt.table.len   *= m.cell_size;
+	kt.table.len   *= m.cell_size; // Temporarily convert length to byte size.
 	for (; cursor != slice_end(kt.table); cursor += m.cell_size )
 	{
-		Slice_Byte cell   = {cursor, m.cell_size};
-		Slice_Byte slots  = {cell.ptr, m.cell_depth * m.slot_size };
+		Slice_Byte cell   = {cursor, m.cell_size};                   // kt.table + id
+		Slice_Byte slots  = {cell.ptr, m.cell_depth * m.slot_size }; // slots = kt.table[id]
 		Byte* slot_cursor = slots.ptr;
 		for (; slot_cursor < slice_end(slots); slot_cursor += m.slot_size) {
 		process_slots:
-			Slice_Byte slot = {slot_cursor, m.slot_size};
-			slice_zero(slot);
+			Slice_Byte slot = {slot_cursor, m.slot_size}; // slot = slots[id]
+			slice_zero(slot);                             // clear(slot)
 		}
-		Byte* next = slot_cursor + m.cell_next_offset;
+		Byte* next = slot_cursor + m.cell_next_offset; // next = slots + next_cell_offset
 		if (next != nullptr) {
-			slots.ptr   = next;
+			slots.ptr   = next; // slots = next
 			slot_cursor = next;
 			goto process_slots;
 		}
 	}
-	kt.table.len = num_cells;
+	kt.table.len = num_cells; // Restore to type-based length.
 }
 inline
 U64 kt1cx__slot_id(KT1CX_Byte kt, U64 key, KT1CX_ByteMeta m) {
-	U64 hash_index = key % cast(U64, kt.table.len * m.cell_size);
+	U64 hash_index = key % cast(U64, kt.table.len);
 	return hash_index;
 }
 Byte* kt1cx__get(KT1CX_Byte kt, U64 key, KT1CX_ByteMeta m) {
 	U64        hash_index  = kt1cx__slot_id(kt, key, m);
-	Slice_Byte cell        = { & kt.table.ptr[hash_index], m.cell_size};
+	SSIZE      cell_offset = hash_index * m.cell_size;
+	Slice_Byte cell        = { & kt.table.ptr[cell_offset], m.cell_size}; // KT1CX_Cell_<Type> cell = kt.table[hash_index]
 	{
-		Slice_Byte slots       = {cell.ptr, m.cell_depth * m.slot_size};
+		Slice_Byte slots       = {cell.ptr, m.cell_depth * m.slot_size}; // KT1CX_Slot_<Type>[kt.cell_depth] slots = cell.slots
 		Byte*      slot_cursor = slots.ptr; 
 		for (; slot_cursor != slice_end(slots); slot_cursor += m.slot_size) {
 		process_slots:
-			KT1CX_Byte_Slot* slot = cast(KT1CX_Byte_Slot*, slot_cursor + m.slot_key_offset);
+			KT1CX_Byte_Slot* slot = cast(KT1CX_Byte_Slot*, slot_cursor + m.slot_key_offset); // slot = slots[id]     KT1CX_Slot_<Type>
 			if (slot->occupied && slot->key == key) {
-				//Slice_Byte slot_value = {slot_cursor, m.type_width};
 				return slot_cursor;
 			}
 		}
-		Byte* slot_next = slot_cursor + m.cell_next_offset;
-		if (slot_next != nullptr) {
-			slots.ptr   = slot_next;
-			slot_cursor = slot_next;
+		Byte* cell_next = cell.ptr + m.cell_next_offset; // cell.next
+		if (cell_next != nullptr) {
+			slots.ptr   = cell_next; // slots = cell_next
+			slot_cursor = cell_next;
+			cell.ptr    = cell_next; // cell = cell_next
 			goto process_slots;
 		}
 		else {
@@ -1465,10 +1464,11 @@ Byte* kt1cx__get(KT1CX_Byte kt, U64 key, KT1CX_ByteMeta m) {
 	}
 }
 Byte* kt1cx__set(KT1CX_Byte kt, U64 key, Slice_Byte value, AllocatorInfo backing_cells, KT1CX_ByteMeta m) {
-	U64        hash_index = kt1cx__slot_id(kt, key, m);
-	Slice_Byte cell       = { & kt.table.ptr[hash_index], m.cell_size};
+	U64        hash_index  = kt1cx__slot_id(kt, key, m);
+	SSIZE      cell_offset = hash_index * m.cell_size;
+	Slice_Byte cell        = { & kt.table.ptr[cell_offset], m.cell_size}; // KT1CX_Cell_<Type> cell = kt.table[hash_index]
 	{
-		Slice_Byte slots       = {cell.ptr, m.cell_depth * m.slot_size};
+		Slice_Byte slots       = {cell.ptr, m.cell_depth * m.slot_size}; // cell.slots
 		Byte*      slot_cursor = slots.ptr; 
 		for (; slot_cursor != slice_end(slots); slot_cursor += m.slot_size) {
 		process_slots:
@@ -1476,15 +1476,13 @@ Byte* kt1cx__set(KT1CX_Byte kt, U64 key, Slice_Byte value, AllocatorInfo backing
 			if (slot->occupied == false) {
 				slot->occupied = true;
 				slot->key      = key;
-				//Slice_Byte slot_value = {slot_cursor, m.type_width};
 				return slot_cursor;
 			}
 			else if (slot->key == key) {
-				//Slice_Byte slot_value = {slot_cursor, m.type_width};
 				return slot_cursor;
 			}
 		}
-		KT1CX_Byte_Cell curr_cell = { slot_cursor + m.cell_next_offset };
+		KT1CX_Byte_Cell curr_cell = { cell.ptr + m.cell_next_offset }; // curr_cell = cell
 		if ( curr_cell.next != nullptr) {
 			slots.ptr   = curr_cell.next;
 			slot_cursor = curr_cell.next;
@@ -1497,8 +1495,7 @@ Byte* kt1cx__set(KT1CX_Byte kt, U64 key, Slice_Byte value, AllocatorInfo backing
 			KT1CX_Byte_Slot* slot = cast(KT1CX_Byte_Slot*, new_cell.ptr + m.slot_key_offset);
 			slot->occupied = true;
 			slot->key      = key;
-			//Slice_Byte slot_value = {new_cell.ptr, m.type_width};
-			return     new_cell.ptr;
+			return new_cell.ptr;
 		}
 	}
 	assert_msg(false, "impossible path");
@@ -1620,7 +1617,7 @@ Str8 str8__fmt_kt1l(AllocatorInfo ainfo, Slice_Byte buffer, KT1L_Str8 table, Str
 			for (;;) {
 				UTF8* cursor         = cursor_potential_token + potential_token_length;
 				fmt_overflow         = cursor >= slice_end(fmt_template);
-				B32 found_terminator = * (cursor_potential_token + potential_token_length) != '>';
+				B32 found_terminator = * (cursor_potential_token + potential_token_length) == '>';
 				if (fmt_overflow || found_terminator) { break; }
 				++ potential_token_length;
 			}
@@ -1999,8 +1996,8 @@ void assert_handler( char const* condition, char const* file, char const* functi
 void api_watl_lex(WATL_LexInfo* info, Str8 source, Opts_watl_lex* opts)
 {
 	if (source.len == 0) { return; }
-	assert(info != nullptr);
-	assert(opts != nullptr);
+	assert(info                  != nullptr);
+	assert(opts                  != nullptr);
 	assert(opts->ainfo_msgs.proc != nullptr);
 	assert(opts->ainfo_toks.proc != nullptr);
 	AllocatorQueryInfo start_snapshot = allocator_query(opts->ainfo_toks);
@@ -2087,11 +2084,11 @@ WATL_LexInfo watl__lex(Str8 source, Opts_watl_lex* opts) { WATL_LexInfo info = {
 void api_watl_parse(WATL_ParseInfo* info, Slice_WATL_Tok tokens, Opts_watl_parse* opts)
 {
 	if (tokens.len == 0) { return; }
-	assert(opts != nullptr);
+	assert(opts                   != nullptr);
 	assert(opts->ainfo_lines.proc != nullptr);
-	assert(opts->ainfo_msgs.proc != nullptr);
+	assert(opts->ainfo_msgs.proc  != nullptr);
 	assert(opts->ainfo_nodes.proc != nullptr);
-	assert(opts->str_cache != nullptr);
+	assert(opts->str_cache        != nullptr);
 	AllocatorQueryInfo start_lines_snapshot = allocator_query(opts->ainfo_lines);
 	AllocatorQueryInfo start_nodes_snapshot = allocator_query(opts->ainfo_nodes);
 	WATL_ParseMsg* msg_last = nullptr;
@@ -2232,6 +2229,7 @@ int main(void)
 	arena_reset(a_msgs);
 	arena_reset(a_toks);
 	Str8 listing = watl_dump_listing(ainfo_arena(a_msgs), parse_res.lines);
+	file_write_str8(lit("watl.v0.msvc.c.listing.txt"), listing);
 	return 0;
 }
 #pragma warning(pop)
