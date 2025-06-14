@@ -21,6 +21,7 @@ $flag_exceptions_disabled          = '/EHsc-'
 $flag_RTTI_disabled                = '/GR-'
 $flag_include                      = '/I'
 $flag_full_src_path                = '/FC'
+$flag_asm_listing_file             = '/FAs'
 $flag_nologo                       = '/nologo'
 $flag_dll                          = '/LD'
 $flag_dll_debug                    = '/LDd'
@@ -42,6 +43,7 @@ $flag_link_win_rt_static_debug     = '/MTd'
 $flag_link_win_subsystem_console   = '/SUBSYSTEM:CONSOLE'
 $flag_link_win_subsystem_windows   = '/SUBSYSTEM:WINDOWS'
 $flag_no_optimization              = '/Od'
+$flag_optimize_speed_max           = '/Ox'
 $flag_optimize_fast                = '/O2'
 $flag_optimize_size                = '/O1'
 $flag_optimize_intrinsics          = '/Oi'
@@ -102,15 +104,18 @@ if ($false) {
 
 # Diagnostic logging
 $compiler_args += $flag_full_src_path
+$compiler_args += $flag_asm_listing_file
 
-$compiler_args += $flag_optimize_intrinsics
+# $compiler_args += $flag_optimize_speed_max
+$compiler_args += $flag_optimize_size
+# $compiler_args += $flag_optimize_intrinsics
 # $compiler_args += $flag_no_optimization
 
 # Debug setup
 $compiler_args += ($flag_define + 'BUILD_DEBUG')
 $compiler_args += $flag_debug
 $compiler_args += ( $flag_path_debug + $path_build + '\' )
-$compiler_args += $flag_link_win_rt_static_debug
+$compiler_args += $flag_link_win_rt_static
 
 # Include setup
 $compiler_args += ($flag_include + $path_root)

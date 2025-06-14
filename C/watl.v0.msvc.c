@@ -435,18 +435,17 @@ def_struct(tmpl(KT1L_Slot,type)) { \
 	typedef tmpl(Slice_KT1L_Slot,type) tmpl(KT1L,type)
 
 typedef Slice_Byte KT1L_Byte;
-typedef def_struct(KT1L_Info) {
-	AllocatorInfo backing;
+typedef def_struct(KT1L_Meta) {
 	SSIZE slot_size;
 	SSIZE kt_value_offset;
 	SSIZE type_width;
 	Str8  type_name;
 };
-SSIZE kt1l__populate_slice_a2(KT1L_Byte* kt, KT1L_Info info, Slice_Byte values, SSIZE num_values );
+SSIZE kt1l__populate_slice_a2(KT1L_Byte* kt, AllocatorInfo backing, KT1L_Meta m, Slice_Byte values, SSIZE num_values );
 #define kt1l_populate_slice_a2(type, kt, ainfo, values) kt1l__populate_slice_a2(  \
 	cast(KT1L_Byte*, kt),                                        \
-	(KT1L_Info){                                                 \
-		.backing      = ainfo,                                     \
+	ainfo,                                                       \
+	(KT1L_Meta){                                                 \
 		.slot_size    = size_of(KT1L_Slot_Str8),                   \
 		.kt_value_offset = offset_of(tmpl(KT1L_Slot,type), value), \
 		.type_width   = size_of(type),                             \
@@ -496,9 +495,7 @@ typedef def_struct(KT1CX_ByteMeta) {
 	SSIZE         type_width;
 	Str8          type_name;
 };
-typedef def_struct(KT1CX_Info) {
-	AllocatorInfo backing_table;
-	AllocatorInfo backing_cells;
+typedef def_struct(KT1CX_InfoMeta) {
 	SSIZE         cell_pool_size;
 	SSIZE         table_size;
 	SSIZE         slot_size;
@@ -509,7 +506,11 @@ typedef def_struct(KT1CX_Info) {
 	SSIZE         type_width;
 	Str8          type_name;
 };
-void  kt1cx__init   (KT1CX_Info info, KT1CX_Byte* result);
+typedef def_struct(KT1CX_Info) {
+	AllocatorInfo backing_table;
+	AllocatorInfo backing_cells;
+};
+void  kt1cx__init   (KT1CX_Info info, KT1CX_InfoMeta m, KT1CX_Byte* result);
 void  kt1cx__clear  (KT1CX_Byte kt,  KT1CX_ByteMeta meta);
 U64   kt1cx__slot_id(KT1CX_Byte kt,  U64 key, KT1CX_ByteMeta meta);
 Byte* kt1cx__get    (KT1CX_Byte kt,  U64 key, KT1CX_ByteMeta meta);
@@ -1014,9 +1015,11 @@ typedef def_struct(OS_Windows_State) {
 };
 global OS_Windows_State os__windows_info;
 
+inline
 OS_SystemInfo* os_system_info(void) {
 	return & os__windows_info.system_info;
 }
+inline
 void os__enable_large_pages(void) {
 	MS_HANDLE token;
 	if (OpenProcessToken(GetCurrentProcess(), MS_TOKEN_ADJUST_PRIVILEGES | MS_TOKEN_QUERY, &token))
@@ -1060,6 +1063,7 @@ inline void  os_vmem_release(void* vm, SSIZE size) { VirtualFree(vm, 0, MS_MEM_R
 #pragma endregion OS
 
 #pragma region VArena (Virutal Address Space Arena)
+inline
 VArena* varena__make(Opts_varena_make* opts) {
 	assert(opts != nullptr);
 	if (opts->reserve_size == 0) { opts->reserve_size = mega(64); }
@@ -1082,6 +1086,7 @@ VArena* varena__make(Opts_varena_make* opts) {
 	};
 	return vm;
 }
+inline
 Slice_Byte varena__push(VArena* vm, SSIZE amount, SSIZE type_width, Opts_varena* opts) {
 	assert(amount != 0);
 	SSIZE alignment      = opts->alignment ? opts->alignment : MEMORY_ALIGNMENT_DEFAULT;
@@ -1372,9 +1377,9 @@ void arena_allocator_proc(AllocatorProc_In in, AllocatorProc_Out* out)
 #pragma endregion Arena
 
 #pragma region Key Table 1-Layer Linear (KT1L)
-SSIZE kt1l__populate_slice_a2(KT1L_Byte* kt, KT1L_Info info, Slice_Byte values, SSIZE num_values ) {
+SSIZE kt1l__populate_slice_a2(KT1L_Byte* kt, AllocatorInfo backing, KT1L_Meta info, Slice_Byte values, SSIZE num_values ) {
 	assert(kt != nullptr);
-	* kt = alloc_slice(info.backing, Byte, info.slot_size * num_values );
+	* kt = alloc_slice(backing, Byte, info.slot_size * num_values );
 	slice_assert(* kt);
 	SSIZE num_bytes = 0;
 	for (range_iter(SSIZE, iter, 0, <, num_values)) {
@@ -1397,17 +1402,17 @@ SSIZE kt1l__populate_slice_a2(KT1L_Byte* kt, KT1L_Info info, Slice_Byte values, 
 
 #pragma region Key Table 1-Layer Chained-Chunked_Cells (KT1CX)
 inline
-void kt1cx__init(KT1CX_Info info, KT1CX_Byte* result) {
+void kt1cx__init(KT1CX_Info info, KT1CX_InfoMeta m, KT1CX_Byte* result) {
 	assert(result                  != nullptr);
 	assert(info.backing_cells.proc != nullptr);
 	assert(info.backing_table.proc != nullptr);
-	assert(info.cell_depth         >  0);
-	assert(info.cell_pool_size     >= kilo(4));
-	assert(info.table_size         >= kilo(4));
-	assert(info.type_width         >  0);
-	result->table     = mem_alloc(info.backing_table, info.table_size * info.cell_size);
-	result->cell_pool = mem_alloc(info.backing_cells, info.cell_size  * info.cell_pool_size);
-	result->table.len = info.table_size; // Setting to the table number of elements instead of byte length.
+	assert(m.cell_depth     >  0);
+	assert(m.cell_pool_size >= kilo(4));
+	assert(m.table_size     >= kilo(4));
+	assert(m.type_width     >  0);
+	result->table     = mem_alloc(info.backing_table, m.table_size * m.cell_size);
+	result->cell_pool = mem_alloc(info.backing_cells, m.cell_size  * m.cell_pool_size);
+	result->table.len = m.table_size; // Setting to the table number of elements instead of byte length.
 }
 void kt1cx__clear(KT1CX_Byte kt, KT1CX_ByteMeta m) {
 	Byte* cursor    = kt.table.ptr;
@@ -1463,6 +1468,7 @@ Byte* kt1cx__get(KT1CX_Byte kt, U64 key, KT1CX_ByteMeta m) {
 		}
 	}
 }
+inline
 Byte* kt1cx__set(KT1CX_Byte kt, U64 key, Slice_Byte value, AllocatorInfo backing_cells, KT1CX_ByteMeta m) {
 	U64        hash_index  = kt1cx__slot_id(kt, key, m);
 	SSIZE      cell_offset = hash_index * m.cell_size;
@@ -1681,6 +1687,7 @@ Str8 str8__fmt(Str8 fmt_template, Slice_A2_Str8* entries) {
 	Str8   result = str8__fmt_kt1l((AllocatorInfo){0}, slice_fmem(buf_mem), kt, fmt_template);
 	return result;
 }
+inline
 void str8cache__init(Str8Cache* cache, Opts_str8cache_init* opts) {
 	assert(cache != nullptr);
 	assert(opts != nullptr);
@@ -1695,6 +1702,8 @@ void str8cache__init(Str8Cache* cache, Opts_str8cache_init* opts) {
 	KT1CX_Info info = {
 		.backing_cells    = opts->cell_reserve,
 		.backing_table    = opts->tbl_backing,
+	};
+	KT1CX_InfoMeta m = {
 		.cell_pool_size   = opts->cell_pool_size,
 		.table_size       = opts->table_size,
 		.slot_size        = size_of(KT1CX_Slot_Str8),
@@ -1705,7 +1714,7 @@ void str8cache__init(Str8Cache* cache, Opts_str8cache_init* opts) {
 		.type_width       = size_of(Str8),
 		.type_name        = lit(stringify(Str8))
 	};
-	kt1cx__init(info, cast(KT1CX_Byte*, & cache->kt));
+	kt1cx__init(info, m, cast(KT1CX_Byte*, & cache->kt));
 	return;
 }
 inline Str8Cache str8cache__make(Opts_str8cache_init* opts) { Str8Cache cache; str8cache__init(& cache, opts); return cache; }
@@ -2079,7 +2088,7 @@ void api_watl_lex(WATL_LexInfo* info, Str8 source, Opts_watl_lex* opts)
 	info->toks.ptr = tok - num + 1;
 	info->toks.len = num;
 }
-WATL_LexInfo watl__lex(Str8 source, Opts_watl_lex* opts) { WATL_LexInfo info = {0}; api_watl_lex(& info, source, opts); return info; }
+inline WATL_LexInfo watl__lex(Str8 source, Opts_watl_lex* opts) { WATL_LexInfo info = {0}; api_watl_lex(& info, source, opts); return info; }
 
 void api_watl_parse(WATL_ParseInfo* info, Slice_WATL_Tok tokens, Opts_watl_parse* opts)
 {
@@ -2147,7 +2156,7 @@ void api_watl_parse(WATL_ParseInfo* info, Slice_WATL_Tok tokens, Opts_watl_parse
 		return;
 	}
 }
-WATL_ParseInfo watl__parse(Slice_WATL_Tok tokens, Opts_watl_parse* opts) { WATL_ParseInfo info = {0}; api_watl_parse(& info, tokens, opts); return info; }
+inline WATL_ParseInfo watl__parse(Slice_WATL_Tok tokens, Opts_watl_parse* opts) { WATL_ParseInfo info = {0}; api_watl_parse(& info, tokens, opts); return info; }
 
 Str8 watl_dump_listing(AllocatorInfo buffer, Slice_WATL_Line lines)
 {

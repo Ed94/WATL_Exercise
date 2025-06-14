@@ -15,3 +15,15 @@ start:
     file.write_str(str.fmt("<name>.listing.source", self.source.name))
 end
 ```
+
+## TODOs
+
+- [] Multi-threaded C example
+- [] Add basic timing benchmark to C examples
+- [] Add profiling support C examples
+- [] Make C++ examples
+- [] Add basic timing benchmark to C++ examples
+- [] Add profiling support C++ examples
+- [] Make Odin examples
+- [] Add basic timing benchmark to Odin examples
+- [] Add profiling support Odin examples
