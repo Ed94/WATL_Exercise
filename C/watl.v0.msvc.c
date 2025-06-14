@@ -2,7 +2,7 @@
 WATL Exercise
 Version:   0 (From Scratch, 1-Stage Compilation, MSVC & WinAPI Only, Win CRT Multi-threaded Static Linkage)
 Host:      Windows 11 (x86-64)
-Toolchain: MSVC 19.43, C-Stanard: 23
+Toolchain: MSVC 19.43, C-Stanard: 11
 */
 
 #pragma warning(disable: 4100)
@@ -705,7 +705,6 @@ SSIZE align_pow2(SSIZE x, SSIZE b) {
     assert((b & (b - 1)) == 0);  // Check power of 2
     return ((x + b - 1) & (~(b - 1)));
 }
-
 inline
 void* memory_copy(void* restrict dest, void const* restrict src, USIZE length) {
 	if (dest == nullptr || src == nullptr) { return nullptr; }
@@ -724,9 +723,7 @@ B32 memory_zero(void* dest, USIZE length) {
 	memset((unsigned char*)dest, 0, length);
 	return true;
 }
-
 inline void slice__zero(Slice_Byte mem, SSIZE typewidth) { slice_assert(mem); memory_zero(mem.ptr, mem.len); }
-
 inline
 void slice__copy(Slice_Byte dest, SSIZE dest_typewidth, Slice_Byte src, SSIZE src_typewidth) {
 	assert(dest.len >= src.len);
@@ -743,25 +740,21 @@ AllocatorQueryInfo allocator_query(AllocatorInfo ainfo) {
 	AllocatorQueryInfo out; ainfo.proc((AllocatorProc_In){ .data = ainfo.data, .op = AllocatorOp_Query}, (AllocatorProc_Out*)& out); 
 	return out;
 }
-
 inline
 void mem_free(AllocatorInfo ainfo, Slice_Byte mem) {
 	assert(ainfo.proc != nullptr);
 	ainfo.proc((AllocatorProc_In){.data = ainfo.data, .op = AllocatorOp_Free, .old_allocation = mem}, &(AllocatorProc_Out){});
 }
-
 inline
 void mem_reset(AllocatorInfo ainfo) {
 	assert(ainfo.proc != nullptr);
 	ainfo.proc((AllocatorProc_In){.data = ainfo.data, .op = AllocatorOp_Reset}, &(AllocatorProc_Out){});
 }
-
 inline
 void mem_rewind(AllocatorInfo ainfo, AllocatorSP save_point) {
 	assert(ainfo.proc != nullptr);
 	ainfo.proc((AllocatorProc_In){.data = ainfo.data, .op = AllocatorOp_Rewind, .old_allocation = {.ptr = cast(Byte*, & save_point)}}, &(AllocatorProc_Out){});
 }
-
 inline
 AllocatorSP mem_save_point(AllocatorInfo ainfo) {
 	assert(ainfo.proc != nullptr);
@@ -769,7 +762,6 @@ AllocatorSP mem_save_point(AllocatorInfo ainfo) {
 	ainfo.proc((AllocatorProc_In){.data = ainfo.data, .op = AllocatorOp_SavePoint}, & out);
 	return out.save_point;
 }
-
 inline
 Slice_Byte mem__alloc(AllocatorInfo ainfo, SSIZE size, Opts_mem_alloc* opts) {
 	assert(ainfo.proc != nullptr);
@@ -784,7 +776,6 @@ Slice_Byte mem__alloc(AllocatorInfo ainfo, SSIZE size, Opts_mem_alloc* opts) {
 	ainfo.proc(in, & out); 
 	return out.allocation;
 }
-
 inline
 Slice_Byte mem__grow(AllocatorInfo ainfo, Slice_Byte mem, SSIZE size, Opts_mem_grow* opts) {
 	assert(ainfo.proc != nullptr);
@@ -800,7 +791,6 @@ Slice_Byte mem__grow(AllocatorInfo ainfo, Slice_Byte mem, SSIZE size, Opts_mem_g
 	ainfo.proc(in, & out);
 	return out.allocation;
 }
-
 inline
 Slice_Byte mem__resize(AllocatorInfo ainfo, Slice_Byte mem, SSIZE size, Opts_mem_resize* opts) {
 	assert(ainfo.proc != nullptr);
@@ -816,7 +806,6 @@ Slice_Byte mem__resize(AllocatorInfo ainfo, Slice_Byte mem, SSIZE size, Opts_mem
 	ainfo.proc(in, & out);
 	return out.allocation;
 }
-
 inline
 Slice_Byte mem__shrink(AllocatorInfo ainfo, Slice_Byte mem, SSIZE size, Opts_mem_shrink* opts) {
 	assert(ainfo.proc != nullptr);
