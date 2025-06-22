@@ -137,8 +137,78 @@ AllocatorOp :: enum u32 {
 	Query, // Must always be implemented
 }
 AllocatorQueryFlag :: enum u64 {
-	
+	AllocatorQuery_Alloc,
+	AllocatorQuery_Free,
+	// Wipe the allocator's state
+	AllocatorQuery_Reset, 
+	// Supports both grow and shrink
+	AllocatorQuery_Shrink,
+	AllocatorQuery_Grow,	
+	// Ability to rewind to a save point (ex: arenas, stack), must also be able to save such a point
+	AllocatorQuery_Rewind, 
 }
+AllocatorQueryFlags :: bit_set[AllocatorQueryFlag; u64]
+AllocatorSP :: struct {
+	type_sig: ^AllocatorProc,
+	slot:     int,
+}
+AllocatorProc :: #type proc (input: AllocatorProc_In, out: ^AllocatorProc_Out)
+AllocatorProc_In :: struct {
+	data:           rawptr,
+	requested_size: int,
+	alignment:      int,
+	old_allocation: []byte,
+	op:             AllocatorOp,
+}
+AllocatorProc_Out :: struct {
+	using _ : struct #raw_union {
+		allocation: []byte,
+		save_point: AllocatorSP,
+	},
+	features:         AllocatorQueryFlags,
+	left:             int,
+	max_alloc:        int,
+	min_alloc:        int,
+	continuity_break: b32,
+}
+AlllocatorQueryInfo :: struct {
+	save_point:       AllocatorSP,
+	features:         AllocatorQueryFlags,
+	left:             int,
+	max_alloc:        int,
+	min_alloc:        int,
+	continuity_break: b32,
+}
+AllocatorInfo :: struct {
+	procedure: AllocatorProc,
+	data:      rawptr,
+}
+// #assert(size_of(AllocatorQueryInfo) == size_of(AllocatorProc_Out))
+
+MEMORY_ALIGNMENT_DEFAULT :: 2 * size_of(rawptr)
+
+allocator_query :: proc(ainfo: AllocatorInfo) -> AlllocatorQueryInfo {
+
+}
+mem_free       :: proc(ainfo: AllocatorInfo, mem: []byte) {
+
+}
+mem_reset      :: proc(ainfo: AllocatorInfo) {
+
+}
+mem_rewind :: proc(ainfo: AllocatorInfo, save_point: AllocatorSP)
+{
+
+}
+mem_save_point :: proc(ainfo: AllocatorInfo) -> AllocatorSP
+
+mem_alloc  :: proc(ainfo: AllocatorInfo) -> []byte
+mem_grow   :: proc(ainfo: AllocatorInfo, mem: []byte, alignment: int = MEMORY_ALIGNMENT_DEFAULT, no_zero: b32 = false)
+mem_resize :: proc(ainfo: AllocatorInfo, mem: []byte, alignment: int = MEMORY_ALIGNMENT_DEFAULT, no_zero: b32 = false)
+mem_shrink :: proc(ainfo: AllocatorInfo, mem: []byte, alignment: int = MEMORY_ALIGNMENT_DEFAULT, no_zero: b32 = false)
+
+alloc_type  :: proc(ainfo: AllocatorInfo, $Type: typeid)            -> []Type
+alloc_slice :: proc(ainfo: AllocatorInfo, $Type: typeid, num : int) -> []Type
 //#endregion Allocator Interface
 
 //#region("Strings")
