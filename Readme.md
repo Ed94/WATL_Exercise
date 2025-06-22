@@ -1,10 +1,13 @@
 # WATL Exercise
 
-An exercise on making the simplest useful parser with different languages or conventions.
+An exercise on making the simplest useful parser with different languages or conventions.  
+The purpose of this exercise is convey succiently many pragmatic concepts for code in a small program.  
+The intent was to use this as a working set of samples for my code visualizing and editing prototyping.
 
 The C code conveys a convention for doing C I've synthesized after studying how several people in the "handmade" community have written their exposed libraries or codebases.
 
 The goal of the exercise is always the following:
+
 ```odin
 start:
     file_contents := file.read_contents(self.source)
@@ -16,14 +19,41 @@ start:
 end
 ```
 
+There are plans for multiple versions of the program:
+
+* V0: Attempt todo a single-threaded example with as little support from the toolchain as possible within the domain of the language. With a single compilation stage.
+* V1: Same as above just multi-threaded. (Subject to change)
+* V2: 2-Stage compilation using a user defined metaprogram written in the same language platform (except for assembly).
+  * This is to manually control symbol generation.
+
+V2s will most likely not be done for the majority of languages on here unless there is a stage metaprogramming library or functionality for the target platform avaialble.
+
+FORTH will be bootstrapped from scratch jonesforth style as thats the correct way to use forth (author's current take..)
+Embeddable scripting languages will be embedded as they should be.
+
 ## TODOs
 
-- [] Multi-threaded C example
-- [] Add basic timing benchmark to C examples
-- [] Add profiling support C examples
-- [] Make C++ examples
-- [] Add basic timing benchmark to C++ examples
-- [] Add profiling support C++ examples
-- [] Make Odin examples
-- [] Add basic timing benchmark to Odin examples
-- [] Add profiling support Odin examples
+Not all of these may ever be completed...
+
+* [x] Single-threaded C example
+* [] Multi-threaded C example
+* [] Add basic timing benchmark to C examples
+* [] Add profiling support C examples
+* [] Make C++ examples
+* [] Add basic timing benchmark to C++ examples
+* [] Add profiling support C++ examples
+* [x] Single-threaded Odin example
+* [] Add basic timing benchmark to Odin examples
+* [] Add profiling support Odin examples
+* [] Single-threaded nasm example
+* [] Multi-threaded nasm example
+* [] Single-threaded FORTH example
+* [] Multi-threaded FORTH example
+* [] Single-threaded lua example
+* [] Multi-threaded lua example
+* [] Single-threaded C# example
+* [] Multi-threaded C# example
+* [] Single-threaded F# example
+* [] Multi-threaded F# example
+* [] Single-threaded umka example
+* [] Multi-threaded umka example
