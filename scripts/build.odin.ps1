@@ -23,6 +23,13 @@ $flag_optimize_none         = '-o:none'
 $flag_output_path           = '-out='
 $flag_default_allocator_nil = '-default-to-nil-allocator'
 
+$need_rebuild = $false
+if (-not (test-path $exe)) { $need_rebuild = $true } 
+else {
+	$source_hash = (get-filehash $path_source -algorithm MD5).Hash
+	$exe_hash    = (get-filehash $exe         -algorithm MD5).Hash
+	if ($exe_hash -ne $source_hash) { $need_rebuild = $true }
+}
 push-location $path_root
 $build_args = @()
 $build_args += $command_build
@@ -36,6 +43,6 @@ $build_args += $flag_no_type_assert
 $build_args += $flag_dyn_map_calls
 $build_args += $flag_default_allocator_nil
 $build_args += $flag_output_path + $exe
-# & $odin $build_args
-& $exe
+if ($need_rebuild) { & $odin $build_args }
 pop-location
+& $exe

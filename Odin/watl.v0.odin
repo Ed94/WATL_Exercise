@@ -6,6 +6,11 @@ Toolchain: odin-lang/Odin dev-2025-06
 */
 package odin
 
+main :: proc()
+{
+	
+}
+
 import "base:builtin"
 import "base:intrinsics"
 
@@ -103,20 +108,38 @@ sll_stack_push_n :: proc(first: ^$SLL_NodeType, n: ^SLL_NodeType) {
     first^ = n
 }
 sll_queue_push_nz :: proc(nil_val: ^$SLL_NodeType, first: ^SLL_NodeType, last: ^SLL_NodeType, n: ^SLL_NodeType) {
-    if first^ == nil_val {
-        first^ = n
-        last^ = n
-        n.next = nil_val
-    } else {
-        last^.next = n
-        last^ = n
-        n.next = nil_val
-    }
+	if first^ == nil_val {
+		first^ = n
+		last^ = n
+		n.next = nil_val
+	} else {
+		last^.next = n
+		last^ = n
+		n.next = nil_val
+	}
 }
 sll_queue_push_n :: proc(first: ^$SLL_NodeType, last: ^SLL_NodeType, n: ^SLL_NodeType) {
     sll_queue_push_nz(nil, first, last, n)
 }
 //#endregion("Memory")
+
+//#region Allocator Interface
+AllocatorOp :: enum u32 {
+	Alloc_NoZero = 0, // If Alloc exist, so must No_Zero
+	Alloc,
+	Free,
+	Reset,
+	Grow_NoZero,
+	Grow,
+	Shrink,
+	Rewind,
+	SavePoint,
+	Query, // Must always be implemented
+}
+AllocatorQueryFlag :: enum u64 {
+	
+}
+//#endregion Allocator Interface
 
 //#region("Strings")
 Raw_String :: struct {
@@ -124,8 +147,3 @@ Raw_String :: struct {
 	len:  int,
 }
 //#endregion("Strings")
-
-main :: proc()
-{
-
-}
