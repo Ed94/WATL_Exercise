@@ -38,6 +38,15 @@ zero :: proc {
 zero_explicit :: proc {
 	memory_zero_explicit,
 }
+
+watl_lex :: proc {
+	api_watl_lex,
+	watl_lex_stack
+}
+watl_parse :: proc {
+	api_watl_parse,
+	watl_parse_stack,
+}
 //#endregion("Package Mappings")
 
 //#region("Memory")
@@ -186,38 +195,35 @@ AllocatorInfo :: struct {
 MEMORY_ALIGNMENT_DEFAULT :: 2 * size_of(rawptr)
 
 allocator_query :: proc(ainfo: AllocatorInfo) -> AlllocatorQueryInfo {
-
+	return {}
 }
 mem_free :: proc(ainfo: AllocatorInfo, mem: []byte) {
-
 }
 mem_reset :: proc(ainfo: AllocatorInfo) {
-
 }
 mem_rewind :: proc(ainfo: AllocatorInfo, save_point: AllocatorSP) {
-
 }
 mem_save_point :: proc(ainfo: AllocatorInfo) -> AllocatorSP {
-
+	return {}
 }
 mem_alloc :: proc(ainfo: AllocatorInfo, size: int, alignment: int = MEMORY_ALIGNMENT_DEFAULT, no_zero: b32 = false) -> []byte {
-
+	return {}
 }
 mem_grow :: proc(ainfo: AllocatorInfo, mem: []byte, size: int, alignment: int = MEMORY_ALIGNMENT_DEFAULT, no_zero: b32 = false) -> []byte {
-
+	return {}
 }
 mem_resize :: proc(ainfo: AllocatorInfo, mem: []byte, size: int, alignment: int = MEMORY_ALIGNMENT_DEFAULT, no_zero: b32 = false) -> []byte {
-
+	return {}
 }
 mem_shrink :: proc(ainfo: AllocatorInfo, mem: []byte, size: int, alignment: int = MEMORY_ALIGNMENT_DEFAULT, no_zero: b32 = false) -> []byte {
-
+	return {}
 }
 
-alloc_type  :: proc(ainfo: AllocatorInfo, $Type: typeid) -> []Type {
-
+alloc_type  :: proc(ainfo: AllocatorInfo, $Type: typeid) -> ^Type {
+	 return nil
 }
 alloc_slice :: proc(ainfo: AllocatorInfo, $Type: typeid, num : int) -> []Type {
-
+	return {}
 }
 //#endregion Allocator Interface
 
@@ -236,22 +242,18 @@ FArena :: struct {
 }
 farena_make :: proc(backing: []byte) -> FArena { arena := FArena {mem = backing}; return arena }
 farena_init :: proc(arena: ^FArena, backing: []byte) {
-
 }
 farena_push :: proc(arena: ^FArena, $Type: typeid, amount: int, alignment: int = MEMORY_ALIGNMENT_DEFAULT) -> []Type {
-
 }
 farena_reset :: proc(arena: ^FArena) {
 	arena.used = 0
 }
 farena_rewind :: proc(arena: ^FArena, save_point: AllocatorSP) {
-
 }
 farena_save :: proc(arena: FArena) -> AllocatorSP {
-
+	return {}
 }
 farena_allocator_proc :: proc(input: AllocatorProc_In, output: ^AllocatorProc_Out) {
-
 }
 //#endregion("FArena")
 
@@ -260,19 +262,15 @@ OS_SystemInfo :: struct {
 	target_page_size: int,
 }
 os_init :: proc() {
-
 }
 os_system_info :: proc() {
-
 }
 os_vmem_commit :: proc(vm: rawptr, size: int, no_large_pages: b32 = false) {
-
 }
 os_vmem_reserve :: proc(size: int, base_addr: int = 0, no_large_pages: b32 = false) -> rawptr {
-
+	return nil
 }
 os_vmem_release :: proc(vm : rawptr, size: int) {
-
 }
 //#endregion("OS")
 
@@ -290,25 +288,21 @@ VArena :: struct {
 	flags:         VArenaFlags,
 }
 varena_make :: proc(base_addr, reserve_size, commit_size: int, flags: VArenaFlags) -> VArena {
-
+ return {}
 }
 varena_push :: proc(va: ^VArena, $Type: typeid, amount: int, alignment: int = MEMORY_ALIGNMENT_DEFAULT) -> []Type {
-
+	return {}
 }
 varena_release :: proc(va: ^VArena) {
-
 }
 varena_rewind :: proc(va: ^VArena) {
-
 }
 varena_shrink :: proc(va: ^VArena) {
-
 }
-varena_save :: proc(va: ^VArena) {
-
+varena_save :: proc(va: ^VArena) -> AllocatorSP {
+	return {}
 }
 varena_allocator_proc :: proc(input: AllocatorProc_In, output: ^AllocatorProc_Out) {
-
 }
 //#endregion("VArena")
 
@@ -351,10 +345,10 @@ KT1L_Meta :: struct {
 	type_name:       int,
 }
 kt1l_populate_slice_a2_Slice_Byte :: proc(kt: ^[]KT1L_Slot(byte), m: KT1L_Meta, backing: AllocatorInfo, values: [][2]byte) -> int {
-
+	return 0
 }
 kt1l_populate_slice_a2 :: proc($Type: typeid, kt: ^[]KT1L_Slot(Type), backing: AllocatorInfo, values: [][2]Type) -> int {
-	
+	return 0
 }
 //#endregion("Key Table 1-Layer Linear (KT1L)")
 
@@ -408,19 +402,17 @@ KT1CX_Info :: struct {
 	backing_cells: AllocatorInfo,
 }
 kt1cx_init :: proc(info: KT1CX_Info, m: KT1CX_InfoMeta, result: ^KT1CX_Byte) {
-
 }
 kt1cx_clear :: proc(kt: KT1CX_Byte, m: KT1CX_ByteMeta) {
-
 }
-kt1cx_slot_id :: proc(kt: KT1CX_Byte, key: u64, m: KT1CX_ByteMeta) {
-
+kt1cx_slot_id :: proc(kt: KT1CX_Byte, key: u64, m: KT1CX_ByteMeta) -> u64 {
+	return 0
 }
-kt1cx_get :: proc(kt: KT1CX_Byte, key: u64, m: KT1CX_ByteMeta) {
-
+kt1cx_get :: proc(kt: KT1CX_Byte, key: u64, m: KT1CX_ByteMeta) -> ^byte {
+	return nil
 }
-kt1cx_set :: proc(kt: KT1CX_Byte, key: u64, value: []byte, backing_cells: AllocatorInfo, m: KT1CX_ByteMeta) {
-
+kt1cx_set :: proc(kt: KT1CX_Byte, key: u64, value: []byte, backing_cells: AllocatorInfo, m: KT1CX_ByteMeta) -> ^byte {
+	return nil
 }
 kt1cx_assert :: proc(kt: $type / KT1CX) {
 	slice_assert(kt.cell_pool)
@@ -435,21 +427,21 @@ char_to_lower :: proc(c: u8) -> u8  { c:=c; if (char_is_upper(c)) { c += ('a' - 
 
 integer_symbols :: proc(value: u8) -> u8 {
 	@static lookup_table: [16]u8 = { '0','1','2','3','4','5','6','7','8','9','A','B','C','D','E','F', }; 
-	return lookup_table[value]; 
+	return  lookup_table[value]; 
 }
 
 str8_to_cstr_capped :: proc(content: string, mem: []byte) -> cstring {
-
+	return nil
 }
 str8_from_u32 :: proc(ainfo: AllocatorInfo, num: u32, radix: u32 = 10, min_digits: u8 = 0, digit_group_separator: u8 = 0) -> string {
-
+	return {}
 }
 
 str8_fmt_backed :: proc(tbl_ainfo, buf_ainfo: AllocatorInfo, fmt_template: string, entries: [][2]string) -> string {
-
+	return {}
 }
 str8_fmt_tmp :: proc(fmt_template: string, entries: [][2]string) -> string {
-
+	return {}
 }
 
 Str8Cache_CELL_DEPTH :: 4
@@ -464,22 +456,20 @@ Str8Cache :: struct {
 	kt:           KT1CX_Str8,
 }
 str8cache_init :: proc(cache: ^Str8Cache, str_reserve, cell_reserve, tbl_backing: AllocatorInfo, cell_pool_size, table_size: int) {
-
 }
 str8cache_make :: proc(str_reserve, cell_reserve, tbl_backing: AllocatorInfo, cell_pool_size, table_size: int) -> Str8Cache { 
 	cache : Str8Cache; str8cache_init(& cache, str_reserve, cell_reserve, tbl_backing, cell_pool_size, table_size); return cache 
 }
 str8cache_clear :: proc(kt: KT1CX_Str8) {
-
 }
 str8cache_get :: proc(kt: KT1CX_Str8, key: u64) -> ^string {
-
+	return nil
 }
 str8cache_set :: proc(kt: KT1CX_Str8, key: u64, value: string, str_reserve, cell_reserve: AllocatorInfo) -> ^string {
-
+	return nil
 }
 cache_str8 :: proc(cache: ^Str8Cache, str: string) -> ^string {
-
+	 return nil
 }
 
 Str8Gen :: struct {
@@ -492,20 +482,105 @@ str8gen_init :: proc(gen: ^Str8Gen, ainfo: AllocatorInfo) {
 
 }
 str8gen_make :: proc(ainfo: AllocatorInfo) -> Str8Gen { gen: Str8Gen; str8gen_init(& gen, ainfo); return gen }
-str8gen_to_bytes  :: proc(gen: Str8Gen) -> []byte { return transmute([]byte)   Raw_Slice {data = gen.ptr, len = gen.len} }
-str8_from_str8gen :: proc(gen: Str8Gen) -> string { return transmute([]string) Raw_Slice {data = gen.ptr, len = gen.len} }
+str8gen_to_bytes  :: proc(gen: Str8Gen) -> []byte { return transmute([]byte) Raw_Slice {data = gen.ptr, len = gen.len} }
+str8_from_str8gen :: proc(gen: Str8Gen) -> string { return transmute(string) Raw_Slice {data = gen.ptr, len = gen.len} }
 
 str8gen_append_str8 :: proc(gen: ^Str8Gen, str: string) {
-
 }
 str8gen_append_fmt :: proc(gen: ^Str8Gen, fmt_template: string, tokens: [][2]string) {
-
 }
 //#endregion("String Operations")
 
 //#region("File System")
-
+FileOpInfo :: struct {
+	content: []byte,
+}
+api_file_read_contents :: proc(result: ^FileOpInfo, path: string, backing: AllocatorInfo, zero_backing: b32 = false) {
+}
+file_read_contents_stack :: proc(path: string, backing: AllocatorInfo, zero_backing: b32 = false) -> FileOpInfo {
+	return {}
+}
 //#endregion("File System")
 
 //#region("WATL")
+WATL_TokKind :: enum u32 {
+	Space           = ' ',
+	Tab             = '\t',
+	Carriage_Return = '\r',
+	Line_Feed       = '\n',
+	Text            = 0xFFFFFFFF,
+}
+WATL_Tok :: string
+WATL_LexStatus_Flag :: enum u32 {
+	MemFail_SliceConstraintFail,
+}
+WATL_LexStatus :: bit_set[WATL_LexStatus_Flag; u32]
+WATL_Pos :: struct {
+	line, column: i32,
+}
+WATL_LexMsg :: struct {
+	next:    ^WATL_LexMsg,
+	content:  string,
+	tok:     ^WATL_Tok,
+	pos:      WATL_Pos,
+}
+WATL_LexInfo :: struct {
+	msgs:    ^WATL_LexMsg,
+	toks:   []WATL_Tok,
+	signal:   WATL_LexStatus,
+}
+api_watl_lex :: proc(info: ^WATL_LexInfo, source: string, 
+	ainfo_msgs:                    AllocatorInfo, 
+	ainfo_toks:                    AllocatorInfo, 
+	failon_unsupported_codepoints: b8 = false, 
+	failon_pos_untrackable:        b8 = false,
+	failon_slice_constraint_fail : b8 = false,
+) {
+}
+watl_lex_stack :: proc(source: string,
+	ainfo_msgs:                    AllocatorInfo, 
+	ainfo_toks:                    AllocatorInfo, 
+	failon_unsupported_codepoints: b8 = false, 
+	failon_pos_untrackable:        b8 = false,
+	failon_slice_constraint_fail : b8 = false,
+) -> (info: WATL_LexInfo)
+{
+	return
+}
+WATL_Node :: string
+WATL_Line :: []WATL_Node
+WATL_ParseMsg :: struct {
+	next:    ^WATL_ParseMsg,
+	content:  string,
+	line:    ^WATL_Line,
+	tok:     ^WATL_Tok,
+	pos:     ^WATL_Pos,
+}
+WATL_ParseStatus_Flag :: enum u32 {
+	MemFail_SliceConstraintFail,
+}
+WATL_ParseStatus :: bit_set[WATL_ParseStatus_Flag; u32]
+WATL_ParseInfo :: struct {
+	lines: []WATL_Line,
+	msgs:   ^WATL_ParseMsg,
+	signal:  WATL_LexStatus,
+}
+api_watl_parse :: proc(info: ^WATL_ParseInfo, tokens: []WATL_Tok, 
+	ainfo_msgs:  AllocatorInfo,
+	ainfo_nodes: AllocatorInfo,
+	ainfo_lines: AllocatorInfo,
+	str_cache:   ^Str8Cache,
+	failon_slice_constraint_fail: b32,
+) {
+}
+watl_parse_stack :: proc(tokens: []WATL_Tok, 
+	ainfo_msgs:  AllocatorInfo,
+	ainfo_nodes: AllocatorInfo,
+	ainfo_lines: AllocatorInfo,
+	str_cache:   ^Str8Cache,
+	failon_slice_constraint_fail: b32,
+) -> (info: WATL_ParseInfo) 
+{
+	return
+}
 //#endregion("WATL")
