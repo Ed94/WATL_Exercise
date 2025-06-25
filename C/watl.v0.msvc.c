@@ -525,13 +525,12 @@ Byte* kt1cx__set    (KT1CX_Byte kt,  U64 key, Slice_Byte value, AllocatorInfo ba
 #pragma region String Operations
 inline B32 char_is_upper(U8 c) { return('A' <= c && c <= 'Z'); }
 inline U8  char_to_lower(U8 c) { if (char_is_upper(c)) { c += ('a' - 'A'); } return(c); }
-
-char* str8_to_cstr_capped(Str8 content, Slice_Byte mem);
-
 inline U8 integer_symbols(U8 value) {
 	local_persist U8 lookup_table[16] = { '0','1','2','3','4','5','6','7','8','9','A','B','C','D','E','F', }; return lookup_table[value]; 
 }
-Str8 str8_from_u32(AllocatorInfo ainfo, U32 num, U32 radix, U8 min_digits, U8 digit_group_separator);
+
+char* str8_to_cstr_capped(Str8 content, Slice_Byte mem);
+Str8  str8_from_u32(AllocatorInfo ainfo, U32 num, U32 radix, U8 min_digits, U8 digit_group_separator);
 
 typedef def_farray(Str8, 2);
 typedef def_Slice(A2_Str8);
@@ -568,8 +567,6 @@ typedef def_struct(Opts_str8cache_init) {
 void      str8cache__init(Str8Cache* cache, Opts_str8cache_init* opts);
 Str8Cache str8cache__make(                  Opts_str8cache_init* opts);
 
-#define str8gen_slice_byte(gen) (Slice_Byte){ cast(Byte*, (gen).ptr), (gen).cap }
-
 #define str8cache_init(cache, ...) str8cache__init(cache, opt_args(Opts_str8cache_init, __VA_ARGS__))
 #define str8cache_make(...)        str8cache__make(       opt_args(Opts_str8cache_init, __VA_ARGS__))
 
@@ -587,6 +584,8 @@ typedef def_struct(Str8Gen) {
 };
 void    str8gen_init(Str8Gen* gen, AllocatorInfo backing);
 Str8Gen str8gen_make(              AllocatorInfo backing);
+
+#define str8gen_slice_byte(gen) (Slice_Byte){ cast(Byte*, (gen).ptr), (gen).cap }
 
 inline Str8 str8_from_str8gen(Str8Gen gen) { return (Str8){gen.ptr, gen.len}; }
 
