@@ -222,19 +222,23 @@ typedef def_enum(U64, AllocatorQueryFlags) {
 	// Ability to rewind to a save point (ex: arenas, stack), must also be able to save such a point
 	AllocatorQuery_Rewind       = (1 << 6),
 };
-typedef def_struct(AllocatorProc_In) {
-	void*        data;
-	SSIZE        requested_size;
-	SSIZE        alignment;
-	Slice_Byte   old_allocation;
-	AllocatorOp  op;
-	byte_pad(4);
-};
+typedef struct AllocatorProc_In  AllocatorProc_In;
 typedef struct AllocatorProc_Out AllocatorProc_Out;
 typedef void fn(AllocatorProc) (AllocatorProc_In In, AllocatorProc_Out* Out);
 typedef def_struct(AllocatorSP) {
 	AllocatorProc* type_sig;
 	SSIZE          slot;
+};
+struct AllocatorProc_In {
+	void*          data;
+	SSIZE          requested_size;
+	SSIZE          alignment;
+	union {
+		Slice_Byte   old_allocation;
+		AllocatorSP  save_point;
+	};
+	AllocatorOp    op;
+	byte_pad(4);
 };
 struct AllocatorProc_Out {
 	union {
@@ -751,7 +755,7 @@ void mem_reset(AllocatorInfo ainfo) {
 inline
 void mem_rewind(AllocatorInfo ainfo, AllocatorSP save_point) {
 	assert(ainfo.proc != nullptr);
-	ainfo.proc((AllocatorProc_In){.data = ainfo.data, .op = AllocatorOp_Rewind, .old_allocation = {.ptr = cast(Byte*, & save_point)}}, &(AllocatorProc_Out){});
+	ainfo.proc((AllocatorProc_In){.data = ainfo.data, .op = AllocatorOp_Rewind, .save_point = save_point}, &(AllocatorProc_Out){});
 }
 inline
 AllocatorSP mem_save_point(AllocatorInfo ainfo) {
@@ -922,7 +926,7 @@ void farena_allocator_proc(AllocatorProc_In in, AllocatorProc_Out* out)
 		break;
 
 		case AllocatorOp_Rewind:
-			farena_rewind(arena, * cast(AllocatorSP*, in.old_allocation.ptr));
+			farena_rewind(arena, in.save_point);
 		break;
 		case AllocatorOp_SavePoint:
 			out->save_point = farena_save(* arena);
@@ -1170,7 +1174,7 @@ void varena_allocator_proc(AllocatorProc_In in, AllocatorProc_Out* out)
 		break;
 
 		case AllocatorOp_Rewind:
-			vm->commit_used = cast(SSIZE, in.old_allocation.ptr);
+			vm->commit_used = in.save_point.slot;
 		break;
 		case AllocatorOp_SavePoint:
 			out->save_point = varena_save(vm);
@@ -1340,7 +1344,7 @@ void arena_allocator_proc(AllocatorProc_In in, AllocatorProc_Out* out)
 		break;
 
 		case AllocatorOp_Rewind:
-			arena_rewind(arena, * cast(AllocatorSP*, in.old_allocation.ptr));
+			arena_rewind(arena, in.save_point);
 		break;
 
 		case AllocatorOp_SavePoint:
