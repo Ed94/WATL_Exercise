@@ -77,34 +77,31 @@ Raw_Slice :: struct {
 	data: rawptr,
 	len:  int,
 }
-slice_assert :: proc "contextless" (s: $Type / []$SliceType) -> Type {
+slice_assert :: proc "contextless" (s: $SliceType / []$Type) -> Type {
 	return assert(len(s) > 0) && assert(s != nil)
 }
-slice_end :: proc "contextless" (s : $Type / []$SliceType) -> Type {
+slice_end :: proc "contextless" (s : $SliceType / []$Type) -> Type {
 	return s[len(s) - 1]
-}
-size_of_slice_type :: proc "contextless" (slice: $Type / []$SliceType) -> int {
-    return size_of(E)
 }
 @(require_results)
 slice_to_bytes :: proc "contextless" (s: []$Type) -> []byte {
-	return ([^]byte)(raw_data(s))[:len(s) * size_of(T)]
+	return ([^]byte)(raw_data(s))[:len(s) * size_of(Type)]
 }
-slice_zero :: proc "contextless" (data: $Type / []$SliceType) -> Type {
-	zero(raw_data(data), size_of(E) * len(data))
+slice_zero :: proc "contextless" (data: $SliceType / []$Type) -> Type {
+	zero(raw_data(data), size_of(Type) * len(data))
 	return data
 }
-slice_copy :: proc "contextless" (dst, src: $Ttype / []$SliceType) -> int {
+slice_copy :: proc "contextless" (dst, src: $SliceType / []$Type) -> int {
 	n := max(0, min(len(dst), len(src)))
 	if n > 0 {
-		intrinsics.mem_copy(raw_data(dst), raw_data(src), n*size_of(E))
+		intrinsics.mem_copy(raw_data(dst), raw_data(src), n * size_of(Type))
 	}
 	return n
 }
-slice_copy_non_overlapping :: proc "contextless" (dst, src: $Type / []$SliceType) -> int {
+slice_copy_non_overlapping :: proc "contextless" (dst, src: $SliceType / []$Type) -> int {
 	n := max(0, min(len(dst), len(src)))
 	if n > 0 {
-		intrinsics.mem_copy_non_overlapping(raw_data(dst), raw_data(src), n*size_of(E))
+		intrinsics.mem_copy_non_overlapping(raw_data(dst), raw_data(src), n * size_of(Type))
 	}
 	return n
 }
@@ -130,7 +127,7 @@ sll_queue_push_n :: proc "contextless" (first: ^$SLL_NodeType, last: ^SLL_NodeTy
 }
 //#endregion("Memory")
 
-//#region Allocator Interface
+//#region("Allocator Interface")
 AllocatorOp :: enum u32 {
 	Alloc_NoZero = 0, // If Alloc exist, so must No_Zero
 	Alloc,
@@ -144,15 +141,15 @@ AllocatorOp :: enum u32 {
 	Query, // Must always be implemented
 }
 AllocatorQueryFlag :: enum u64 {
-	AllocatorQuery_Alloc,
-	AllocatorQuery_Free,
+	Alloc,
+	Free,
 	// Wipe the allocator's state
-	AllocatorQuery_Reset,
+	Reset,
 	// Supports both grow and shrink
-	AllocatorQuery_Shrink,
-	AllocatorQuery_Grow,
+	Shrink,
+	Grow,
 	// Ability to rewind to a save point (ex: arenas, stack), must also be able to save such a point
-	AllocatorQuery_Rewind,
+	Rewind,
 }
 AllocatorQueryFlags :: bit_set[AllocatorQueryFlag; u64]
 AllocatorSP :: struct {
@@ -164,7 +161,10 @@ AllocatorProc_In :: struct {
 	data:             rawptr,
 	requested_size:   int,
 	alignment:        int,
-	old_allocation: []byte,
+	using _ : struct #raw_union {
+		old_allocation: []byte,
+		save_point    : AllocatorSP,
+	},
 	op:               AllocatorOp,
 }
 AllocatorProc_Out :: struct {
@@ -178,7 +178,7 @@ AllocatorProc_Out :: struct {
 	min_alloc:        int,
 	continuity_break: b32,
 }
-AlllocatorQueryInfo :: struct {
+AllocatorQueryInfo :: struct {
 	save_point:       AllocatorSP,
 	features:         AllocatorQueryFlags,
 	left:             int,
@@ -194,38 +194,106 @@ AllocatorInfo :: struct {
 
 MEMORY_ALIGNMENT_DEFAULT :: 2 * size_of(rawptr)
 
-allocator_query :: proc(ainfo: AllocatorInfo) -> AlllocatorQueryInfo {
-	return {}
+allocator_query :: proc(ainfo: AllocatorInfo) -> AllocatorQueryInfo {
+	assert(ainfo.procedure != nil)
+	out: AllocatorQueryInfo; ainfo.procedure({data = ainfo.data, op = .Query}, transmute(^AllocatorProc_Out) & out)
+	return out
 }
 mem_free :: proc(ainfo: AllocatorInfo, mem: []byte) {
+	assert(ainfo.procedure != nil)
+	ainfo.procedure({data = ainfo.data, op = .Free, old_allocation = mem}, & {})
 }
 mem_reset :: proc(ainfo: AllocatorInfo) {
+	assert(ainfo.procedure != nil)
+	ainfo.procedure({data = ainfo.data, op = .Reset}, &{})
 }
 mem_rewind :: proc(ainfo: AllocatorInfo, save_point: AllocatorSP) {
+	assert(ainfo.procedure != nil)
+	ainfo.procedure({data = ainfo.data, op = .Rewind, save_point = save_point}, & {})
 }
 mem_save_point :: proc(ainfo: AllocatorInfo) -> AllocatorSP {
-	return {}
+	assert(ainfo.procedure != nil)
+	out: AllocatorProc_Out
+	ainfo.procedure({data = ainfo.data, op = .SavePoint}, & out)
+	return out.save_point
 }
 mem_alloc :: proc(ainfo: AllocatorInfo, size: int, alignment: int = MEMORY_ALIGNMENT_DEFAULT, no_zero: b32 = false) -> []byte {
-	return {}
+	assert(ainfo.procedure != nil)
+	input := AllocatorProc_In {
+		data           = ainfo.data,
+		op             = no_zero ? .Alloc_NoZero : .Alloc,
+		requested_size = size,
+		alignment      = alignment,
+	}
+	output: AllocatorProc_Out
+	ainfo.procedure(input, & output)
+	return output.allocation
 }
 mem_grow :: proc(ainfo: AllocatorInfo, mem: []byte, size: int, alignment: int = MEMORY_ALIGNMENT_DEFAULT, no_zero: b32 = false) -> []byte {
-	return {}
+	assert(ainfo.procedure != nil)
+	input := AllocatorProc_In {
+		data           = ainfo.data,
+		op             = no_zero ? .Grow_NoZero : .Grow,
+		requested_size = size,
+		alignment      = alignment,
+		old_allocation = mem,
+	}
+	output: AllocatorProc_Out
+	ainfo.procedure(input, & output)
+	return output.allocation
 }
 mem_resize :: proc(ainfo: AllocatorInfo, mem: []byte, size: int, alignment: int = MEMORY_ALIGNMENT_DEFAULT, no_zero: b32 = false) -> []byte {
-	return {}
+	assert(ainfo.procedure != nil)
+	input := AllocatorProc_In {
+		data           = ainfo.data,
+		op             = len(mem) < size ? .Shrink :  no_zero ? .Grow_NoZero : .Grow,
+		requested_size = size,
+		alignment      = alignment,
+		old_allocation = mem,
+	}
+	output: AllocatorProc_Out
+	ainfo.procedure(input, & output)
+	return output.allocation
 }
 mem_shrink :: proc(ainfo: AllocatorInfo, mem: []byte, size: int, alignment: int = MEMORY_ALIGNMENT_DEFAULT, no_zero: b32 = false) -> []byte {
-	return {}
+	assert(ainfo.procedure != nil)
+	input := AllocatorProc_In {
+		data           = ainfo.data,
+		op             = .Shrink,
+		requested_size = size,
+		alignment      = alignment,
+		old_allocation = mem,
+	}
+	output: AllocatorProc_Out
+	ainfo.procedure(input, & output)
+	return output.allocation
 }
 
-alloc_type  :: proc(ainfo: AllocatorInfo, $Type: typeid) -> ^Type {
-	 return nil
+alloc_type  :: proc(ainfo: AllocatorInfo, $Type: typeid, alignment: int = MEMORY_ALIGNMENT_DEFAULT, no_zero: b32 = false) -> ^Type {
+	assert(ainfo.procedure != nil)
+	input := AllocatorProc_In {
+		data           = ainfo.data,
+		op             = no_zero ? .Alloc_NoZero : .Alloc,
+		requested_size = size_of(Type),
+		alignment      = alignment,
+	}
+	output: AllocatorProc_Out
+	ainfo.procedure(input, & output)
+	return transmute(^Type) raw_data(output.allocation)
 }
-alloc_slice :: proc(ainfo: AllocatorInfo, $Type: typeid, num : int) -> []Type {
-	return {}
+alloc_slice :: proc(ainfo: AllocatorInfo, $SliceType: []$Type, num : int) -> []Type {
+	assert(ainfo.procedure != nil)
+	input := AllocatorProc_In {
+		data           = ainfo.data,
+		op             = no_zero ? .Alloc_NoZero : .Alloc,
+		requested_size = size_of(Type) * num,
+		alignment      = alignment,
+	}
+	output: AllocatorProc_Out
+	ainfo.procedure(input, & output)
+	return transmute([]Type) Raw_Slice { raw_data(output.allocation), num }
 }
-//#endregion Allocator Interface
+//#endregion("Allocator Interface")
 
 //#region("Strings")
 Raw_String :: struct {
@@ -233,7 +301,6 @@ Raw_String :: struct {
 	len:     int,
 }
 //#endregion("Strings")
-
 
 //#region("FArena")
 FArena :: struct {
@@ -287,7 +354,7 @@ VArena :: struct {
 	commit_used:   int,
 	flags:         VArenaFlags,
 }
-varena_make :: proc(base_addr, reserve_size, commit_size: int, flags: VArenaFlags) -> VArena {
+varena_make :: proc(reserve_size, commit_size: int, base_addr: int = 0, flags: VArenaFlags) -> ^VArena {
  return {}
 }
 varena_push :: proc(va: ^VArena, $Type: typeid, amount: int, alignment: int = MEMORY_ALIGNMENT_DEFAULT) -> []Type {
@@ -320,13 +387,23 @@ Arena :: struct {
 	pos:       int,
 	flags:     ArenaFlags,
 }
-arena_make :: proc()
-arena_push :: proc()
-arena_release :: proc()
-arena_reset :: proc()
-arena_rewind :: proc()
-arena_save :: proc()
-arena_allocator_proc :: proc(input: AllocatorProc_In, output: AllocatorProc_Out)
+arena_make :: proc(reserve_size, commit_size: int, base_addr: int = 0, flags: ArenaFlags) -> ^Arena {
+	return nil
+}
+arena_push :: proc(arena: ^Arena, $Type: typeid, amount: int, alignment: int = MEMORY_ALIGNMENT_DEFAULT) -> []Type {
+	return {}
+}
+arena_release :: proc(arena: ^Arena) {
+}
+arena_reset :: proc(arena: ^Arena) {
+}
+arena_rewind :: proc(arena: ^Arena, save_point: AllocatorSP) {
+}
+arena_save :: proc(arena: ^Arena) -> AllocatorSP {
+	return {}
+}
+arena_allocator_proc :: proc(input: AllocatorProc_In, output: AllocatorProc_Out) {
+}
 //#endregion("Arena (Casey-Ryan Composite Arena")
 
 //#region("Hashing")
@@ -362,7 +439,7 @@ KT1CX_Cell :: struct($type: typeid, $depth: int) {
 	slots: [depth]KT1CX_Slot(type),
 	next:  ^KT1CX_Cell(type, depth),
 }
-KT1CX :: struct($type: typeid, $depth: int, $cell: typeid / KT1CX_Cell(type, depth)) {
+KT1CX :: struct($cell: typeid / KT1CX_Cell($type, $depth)) {
 	cell_pool: []cell,
 	table:     []cell,
 }
@@ -448,7 +525,7 @@ Str8Cache_CELL_DEPTH :: 4
 
 KT1CX_Slot_Str8 :: KT1CX_Slot(string)
 KT1CX_Cell_Str8 :: KT1CX_Cell(string, Str8Cache_CELL_DEPTH)
-KT1CX_Str8      :: KT1CX(string, Str8Cache_CELL_DEPTH, KT1CX_Cell_Str8)
+KT1CX_Str8      :: KT1CX(KT1CX_Cell_Str8)
 Str8Cache :: struct {
 	str_reserve:  AllocatorInfo,
 	cell_reserve: AllocatorInfo,
