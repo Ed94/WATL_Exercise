@@ -20,6 +20,11 @@ min   :: builtin.min
 max   :: builtin.max
 clamp :: builtin.clamp
 
+alloc :: proc {
+	mem_alloc,
+	alloc_type,
+	alloc_slice,
+}
 copy :: proc {
 	memory_copy,
 	slice_copy,
@@ -31,6 +36,21 @@ copy_non_overlapping :: proc {
 end :: proc {
 	slice_end,
 }
+push :: proc {
+	farena_push,
+	varena_push,
+	arena_push,
+}
+reset :: proc {
+	farena_reset,
+	varena_reset,
+	arena_reset,
+}
+save :: proc {
+	farena_save,
+	varena_save,
+	arena_save,
+}
 zero :: proc {
 	memory_zero,
 	slice_zero,
@@ -41,7 +61,7 @@ zero_explicit :: proc {
 
 watl_lex :: proc {
 	api_watl_lex,
-	watl_lex_stack
+	watl_lex_stack,
 }
 watl_parse :: proc {
 	api_watl_parse,
@@ -50,6 +70,11 @@ watl_parse :: proc {
 //#endregion("Package Mappings")
 
 //#region("Memory")
+Kilo :: 1024
+Mega :: Kilo * 1024
+Giga :: Mega * 1024
+Tera :: Giga * 1024
+
 align_pow2 :: proc(x: int, b: int) -> int {
     assert(b != 0)
     assert((b & (b - 1)) == 0) // Check power of 2
@@ -153,7 +178,7 @@ AllocatorQueryFlag :: enum u64 {
 }
 AllocatorQueryFlags :: bit_set[AllocatorQueryFlag; u64]
 AllocatorSP :: struct {
-	type_sig: ^AllocatorProc,
+	type_sig: AllocatorProc,
 	slot:     int,
 }
 AllocatorProc :: #type proc (input: AllocatorProc_In, out: ^AllocatorProc_Out)
@@ -307,20 +332,127 @@ FArena :: struct {
 	mem:  []byte,
 	used:   int,
 }
-farena_make :: proc(backing: []byte) -> FArena { arena := FArena {mem = backing}; return arena }
+farena_make :: proc(backing: []byte) -> FArena { 
+	arena := FArena {mem = backing}
+	return arena 
+}
 farena_init :: proc(arena: ^FArena, backing: []byte) {
+	assert(arena != nil)
+	arena.mem  = backing
+	arena.used = 0
 }
 farena_push :: proc(arena: ^FArena, $Type: typeid, amount: int, alignment: int = MEMORY_ALIGNMENT_DEFAULT) -> []Type {
+	assert(arena != nil)
+	if amount == 0 {
+		return {}
+	}
+	desired   := size_of(Type) * amount
+	to_commit := align_pow2(desired, alignment)
+	unused    := len(arena.mem) - arena.used
+	assert(to_commit <= unused)
+	ptr        := raw_data(arena.mem[arena.used:])
+	arena.used += to_commit
+	return transmute([]Type) Raw_Slice { data = ptr, len = amount }
 }
 farena_reset :: proc(arena: ^FArena) {
 	arena.used = 0
 }
 farena_rewind :: proc(arena: ^FArena, save_point: AllocatorSP) {
+	assert(save_point.type_sig  == farena_allocator_proc)
+	assert(save_point.slot >= 0 && save_point.slot <= arena.used)
+	arena.used = save_point.slot
 }
 farena_save :: proc(arena: FArena) -> AllocatorSP {
-	return {}
+	return AllocatorSP { type_sig = farena_allocator_proc, slot = arena.used }
 }
 farena_allocator_proc :: proc(input: AllocatorProc_In, output: ^AllocatorProc_Out) {
+	assert(output     != nil)
+	assert(input.data != nil)
+	arena := cast(^FArena) input.data
+	
+	switch input.op 
+	{
+	case .Alloc, .Alloc_NoZero:
+		output.allocation = slice_to_bytes(farena_push(arena, byte, input.requested_size, input.alignment))
+		if input.op == .Alloc {
+			zero(raw_data(output.allocation), len(output.allocation))
+		}
+		
+	case .Free:
+		// No-op for arena
+		
+	case .Reset:
+		farena_reset(arena)
+		
+	case .Grow, .Grow_NoZero:
+		// Check if the allocation is at the end of the arena
+		if len(input.old_allocation) == 0 {
+			output.allocation = {}
+			break
+		}
+		alloc_end := uintptr(raw_data(input.old_allocation)) + uintptr(len(input.old_allocation))
+		arena_end := uintptr(raw_data(arena.mem)) + uintptr(arena.used)
+		if alloc_end != arena_end {
+			// Not at the end, can't grow in place
+			output.allocation = {}
+			break
+		}
+		// Calculate growth
+		grow_amount  := input.requested_size - len(input.old_allocation)
+		aligned_grow := align_pow2(grow_amount, input.alignment)
+		unused       := len(arena.mem) - arena.used
+		if aligned_grow > unused {
+			// Not enough space
+			output.allocation = {}
+			break
+		}
+		arena.used += aligned_grow
+		output.allocation = transmute([]byte) Raw_Slice { 
+			data = raw_data(input.old_allocation), 
+			len  = input.requested_size 
+		}
+		if input.op == .Grow {
+			zero(raw_data(output.allocation[len(input.old_allocation):]), grow_amount)
+		}
+		
+	case .Shrink:
+		// Check if the allocation is at the end of the arena
+		if len(input.old_allocation) == 0 {
+			output.allocation = {}
+			break
+		}
+		alloc_end := uintptr(raw_data(input.old_allocation)) + uintptr(len(input.old_allocation))
+		arena_end := uintptr(raw_data(arena.mem))            + uintptr(arena.used)
+		if alloc_end != arena_end {
+			// Not at the end, can't shrink but return adjusted size
+			output.allocation = transmute([]byte) Raw_Slice { 
+				data = raw_data(input.old_allocation), 
+				len  = input.requested_size 
+			}
+			break
+		}
+		// Calculate shrinkage
+		aligned_original := align_pow2(len(input.old_allocation), MEMORY_ALIGNMENT_DEFAULT)
+		aligned_new      := align_pow2(input.requested_size, input.alignment)
+		arena.used       -= (aligned_original - aligned_new)
+		output.allocation = transmute([]byte) Raw_Slice { 
+			data = raw_data(input.old_allocation), 
+			len  = input.requested_size 
+		}
+		
+	case .Rewind:
+		farena_rewind(arena, input.save_point)
+		
+	case .SavePoint:
+		output.save_point = farena_save(arena^)
+		
+	case .Query:
+		output.features   = {.Alloc, .Reset, .Grow, .Shrink, .Rewind}
+		output.max_alloc  = len(arena.mem) - arena.used
+		output.min_alloc  = 0
+		output.left       = output.max_alloc
+		output.save_point = farena_save(arena^)
+	}
 }
 //#endregion("FArena")
 
@@ -328,16 +460,93 @@ farena_allocator_proc :: proc(input: AllocatorProc_In, output: ^AllocatorProc_Ou
 OS_SystemInfo :: struct {
 	target_page_size: int,
 }
+OS_Windows_State :: struct {
+	system_info: OS_SystemInfo,
+}
+@(private)
+os_windows_info: OS_Windows_State
+
+// Windows API constants
+MS_INVALID_HANDLE_VALUE    :: ~uintptr(0)
+MS_MEM_COMMIT              :: 0x00001000
+MS_MEM_RESERVE             :: 0x00002000
+MS_MEM_LARGE_PAGES         :: 0x20000000
+MS_MEM_RELEASE             :: 0x00008000
+MS_PAGE_READWRITE          :: 0x04
+MS_TOKEN_ADJUST_PRIVILEGES :: 0x0020
+MS_SE_PRIVILEGE_ENABLED    :: 0x00000002
+MS_TOKEN_QUERY             :: 0x0008
+// Windows API types
+MS_BOOL                :: i32
+MS_DWORD               :: u32
+MS_HANDLE              :: rawptr
+MS_LPVOID              :: rawptr
+MS_LPWSTR              :: [^]u16
+MS_LUID                :: struct { low_part: MS_DWORD, high_part: i32 }
+MS_LUID_AND_ATTRIBUTES :: struct { luid: MS_LUID, attributes: MS_DWORD }
+MS_TOKEN_PRIVILEGES    :: struct { privilege_count: MS_DWORD, privileges: [1]MS_LUID_AND_ATTRIBUTES }
+// Windows API imports
+foreign import kernel32 "system:Kernel32.lib"
+foreign import advapi32 "system:Advapi32.lib"
+@(default_calling_convention="stdcall")
+foreign kernel32 {
+	CloseHandle         :: proc(handle: MS_HANDLE) -> MS_BOOL ---
+	GetCurrentProcess   :: proc() -> MS_HANDLE ---
+	GetLargePageMinimum :: proc() -> uintptr ---
+	VirtualAlloc        :: proc(address: MS_LPVOID, size: uintptr, allocation_type: MS_DWORD, protect: MS_DWORD) -> MS_LPVOID ---
+	VirtualFree         :: proc(address: MS_LPVOID, size: uintptr, free_type: MS_DWORD) -> MS_BOOL ---
+}
+@(default_calling_convention="stdcall")
+foreign advapi32 {
+	AdjustTokenPrivileges :: proc(token_handle: MS_HANDLE, disable_all: MS_BOOL, new_state: ^MS_TOKEN_PRIVILEGES, buffer_length: MS_DWORD, previous_state: ^MS_TOKEN_PRIVILEGES, return_length: ^MS_DWORD) -> MS_BOOL ---
+	LookupPrivilegeValueW :: proc(system_name: MS_LPWSTR, name: MS_LPWSTR, luid: ^MS_LUID) -> MS_BOOL ---
+	OpenProcessToken      :: proc(process_handle: MS_HANDLE, desired_access: MS_DWORD, token_handle: ^MS_HANDLE) -> MS_BOOL ---
+}
+
+os_enable_large_pages :: proc() {
+	token: MS_HANDLE
+	if OpenProcessToken(GetCurrentProcess(), MS_TOKEN_ADJUST_PRIVILEGES | MS_TOKEN_QUERY, &token) != 0 
+	{
+		luid: MS_LUID
+		@static se_lock_memory_name := []u16{'S','e','L','o','c','k','M','e','m','o','r','y','P','r','i','v','i','l','e','g','e',0}
+		if LookupPrivilegeValueW(nil, raw_data(se_lock_memory_name), &luid) != 0
+		{
+			priv := MS_TOKEN_PRIVILEGES {
+				privilege_count = 1,
+				privileges = {
+					{
+						luid = luid,
+						attributes = MS_SE_PRIVILEGE_ENABLED,
+					},
+				},
+			}
+			AdjustTokenPrivileges(token, 0, &priv, size_of(MS_TOKEN_PRIVILEGES), nil, nil)
+		}
+		CloseHandle(token)
+	}
+}
 os_init :: proc() {
+	os_enable_large_pages()
+	info                 := &os_windows_info.system_info
+	info.target_page_size = int(GetLargePageMinimum())
 }
-os_system_info :: proc() {
+os_system_info :: proc() -> ^OS_SystemInfo {
+	return &os_windows_info.system_info
 }
-os_vmem_commit :: proc(vm: rawptr, size: int, no_large_pages: b32 = false) {
+os_vmem_commit :: proc(vm: rawptr, size: int, no_large_pages: b32 = false) -> b32 {
+	// Large pages disabled for now (not failing gracefully in original C)
+	result := VirtualAlloc(vm, uintptr(size), MS_MEM_COMMIT, MS_PAGE_READWRITE) != nil
+	return b32(result)
 }
 os_vmem_reserve :: proc(size: int, base_addr: int = 0, no_large_pages: b32 = false) -> rawptr {
-	return nil
+	result := VirtualAlloc(rawptr(uintptr(base_addr)), uintptr(size),
+		MS_MEM_RESERVE | MS_MEM_COMMIT,
+		// | (no_large_pages ? 0 : MS_MEM_LARGE_PAGES), // Large pages disabled
+		MS_PAGE_READWRITE)
+	return result
 }
-os_vmem_release :: proc(vm : rawptr, size: int) {
+os_vmem_release :: proc(vm: rawptr, size: int) {
+	VirtualFree(vm, 0, MS_MEM_RELEASE)
 }
 //#endregion("OS")
 
@@ -354,22 +563,159 @@ VArena :: struct {
 	commit_used:   int,
 	flags:         VArenaFlags,
 }
-varena_make :: proc(reserve_size, commit_size: int, base_addr: int = 0, flags: VArenaFlags) -> ^VArena {
- return {}
+
+varena_make :: proc(reserve_size, commit_size: int, base_addr: int = 0, flags: VArenaFlags = {}) -> ^VArena {
+	reserve_size := reserve_size
+	commit_size  := commit_size
+	if reserve_size == 0 { reserve_size = 64 * Mega } // 64MB
+	if commit_size  == 0 { commit_size  = 64 * Mega } // 64MB
+	reserve_size_aligned := align_pow2(reserve_size, os_system_info().target_page_size)
+	commit_size_aligned  := align_pow2(commit_size, os_system_info().target_page_size)
+	no_large_pages       := .No_Large_Pages in flags ? cast(b32) true : cast(b32) false
+	base := os_vmem_reserve(reserve_size_aligned, base_addr, no_large_pages)
+	assert(base != nil)
+	os_vmem_commit(base, commit_size_aligned, no_large_pages)
+	header_size := align_pow2(size_of(VArena), MEMORY_ALIGNMENT_DEFAULT)
+	vm := cast(^VArena) base
+	vm^ = VArena {
+		reserve_start = int(uintptr(base)) + header_size,
+		reserve       = reserve_size_aligned,
+		commit_size   = commit_size_aligned,
+		committed     = commit_size_aligned,
+		commit_used   = header_size,
+		flags         = flags,
+	}
+	return vm
 }
 varena_push :: proc(va: ^VArena, $Type: typeid, amount: int, alignment: int = MEMORY_ALIGNMENT_DEFAULT) -> []Type {
-	return {}
+	assert(va != nil)
+	assert(amount != 0)
+	requested_size := amount * size_of(Type)
+	aligned_size   := align_pow2(requested_size, alignment)
+	current_offset := va.reserve_start + va.commit_used
+	to_be_used     := va.commit_used   + aligned_size
+	reserve_left   := va.reserve       - va.commit_used
+	commit_left    := va.committed     - va.commit_used
+	exhausted      := commit_left      < to_be_used
+	assert(to_be_used < reserve_left)
+	if exhausted
+	{
+		next_commit_size: int
+		if reserve_left > 0 {
+			next_commit_size = max(va.commit_size, to_be_used)
+		} else {
+			next_commit_size = align_pow2(reserve_left, os_system_info().target_page_size)
+		}
+		if next_commit_size > 0
+		{
+			next_commit_start := rawptr(uintptr(va) + uintptr(va.committed))
+			no_large_pages    := cast(b32) (.No_Large_Pages in va.flags ? true : false)
+			commit_result     := os_vmem_commit(next_commit_start, next_commit_size, no_large_pages)
+			if ! commit_result {
+				return {}
+			}
+			va.committed += next_commit_size
+		}
+	}
+	va.commit_used = to_be_used
+	return transmute([]Type) Raw_Slice { 
+		data = rawptr(uintptr(current_offset)), 
+		len  = amount 
+	}
 }
 varena_release :: proc(va: ^VArena) {
+	os_vmem_release(va, va.reserve)
 }
-varena_rewind :: proc(va: ^VArena) {
+varena_rewind :: proc(va: ^VArena, save_point: AllocatorSP) {
+	assert(va != nil)
+	assert(save_point.type_sig == varena_allocator_proc)
+	va.commit_used = max(save_point.slot, size_of(VArena))
 }
-varena_shrink :: proc(va: ^VArena) {
+varena_reset :: proc(va: ^VArena) {
+	va.commit_used = size_of(VArena)
+}
+varena_shrink :: proc(va: ^VArena, old_allocation: []byte, requested_size: int, alignment: int = MEMORY_ALIGNMENT_DEFAULT) -> []byte {
+	assert(va != nil)
+	current_offset := va.reserve_start + va.commit_used
+	shrink_amount  := len(old_allocation) - requested_size
+	if shrink_amount < 0 {
+		return old_allocation
+	}
+	assert(raw_data(old_allocation) == rawptr(uintptr(current_offset)))
+	va.commit_used -= shrink_amount
+	return transmute([]byte) Raw_Slice { 
+		data = raw_data(old_allocation), 
+		len  = requested_size 
+	}
 }
 varena_save :: proc(va: ^VArena) -> AllocatorSP {
-	return {}
+	return AllocatorSP { type_sig = varena_allocator_proc, slot = va.commit_used }
 }
 varena_allocator_proc :: proc(input: AllocatorProc_In, output: ^AllocatorProc_Out) {
+	assert(output     != nil)
+	assert(input.data != nil)
+	vm := cast(^VArena) input.data
+	switch input.op 
+	{
+	case .Alloc, .Alloc_NoZero:
+		output.allocation = slice_to_bytes(varena_push(vm, byte, input.requested_size, input.alignment))
+		if input.op == .Alloc {
+			zero(raw_data(output.allocation), len(output.allocation))
+		}
+		
+	case .Free:
+		// No-op for arena
+		
+	case .Reset:
+		varena_reset(vm)
+		
+	case .Grow, .Grow_NoZero:
+		grow_amount := input.requested_size - len(input.old_allocation)
+		if grow_amount == 0 {
+			output.allocation = input.old_allocation
+			return
+		}
+		current_offset := vm.reserve_start + vm.commit_used
+		assert(raw_data(input.old_allocation) == rawptr(uintptr(current_offset)))
+
+		allocation := slice_to_bytes(varena_push(vm, byte, grow_amount, input.alignment))
+		assert(raw_data(allocation) != nil)
+
+		output.allocation = transmute([]byte) Raw_Slice { 
+			data = raw_data(input.old_allocation), 
+			len = input.requested_size 
+		}
+		if input.op == .Grow {
+			zero(raw_data(output.allocation[len(input.old_allocation):]), grow_amount)
+		}
+		
+	case .Shrink:
+		current_offset := vm.reserve_start + vm.commit_used
+		shrink_amount  := len(input.old_allocation) - input.requested_size
+		if shrink_amount < 0 {
+			output.allocation = input.old_allocation
+			return
+		}
+		assert(raw_data(input.old_allocation) == rawptr(uintptr(current_offset)))
+		vm.commit_used -= shrink_amount
+		output.allocation = transmute([]byte) Raw_Slice { 
+			data = raw_data(input.old_allocation), 
+			len  = input.requested_size 
+		}
+		
+	case .Rewind:
+		varena_rewind(vm, input.save_point)
+		
+	case .SavePoint:
+		output.save_point = varena_save(vm)
+		
+	case .Query:
+		output.features   = {.Alloc, .Grow, .Shrink, .Reset, .Rewind}
+		output.max_alloc  = vm.reserve - vm.committed
+		output.min_alloc  = 4 * Kilo
+		output.left       = output.max_alloc
+		output.save_point = varena_save(vm)
+	}
 }
 //#endregion("VArena")
 
