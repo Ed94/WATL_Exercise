@@ -102,8 +102,9 @@ Raw_Slice :: struct {
 	data: rawptr,
 	len:  int,
 }
-slice_assert :: proc "contextless" (s: $SliceType / []$Type) -> Type {
-	return assert(len(s) > 0) && assert(s != nil)
+slice_assert :: proc (s: $SliceType / []$Type) {
+	assert(len(s) > 0)
+	assert(s != nil)
 }
 slice_end :: proc "contextless" (s : $SliceType / []$Type) -> Type {
 	return s[len(s) - 1]
@@ -131,23 +132,23 @@ slice_copy_non_overlapping :: proc "contextless" (dst, src: $SliceType / []$Type
 	return n
 }
 
-sll_stack_push_n :: proc "contextless" (first: ^$SLL_NodeType, n: ^SLL_NodeType) {
-    n.next = first^
-    first^ = n
+sll_stack_push_n :: proc "contextless" (curr, n, n_link: ^^$Type) {
+    (n_link ^) = (curr ^)
+    (curr   ^) = (n    ^)
 }
-sll_queue_push_nz :: proc(nil_val: ^$SLL_NodeType, first: ^SLL_NodeType, last: ^SLL_NodeType, n: ^SLL_NodeType) {
-	if first^ == nil_val {
-		first^ = n
-		last^  = n
+sll_queue_push_nz :: proc(nil_val: ^$Type, first, last, n: ^^Type) {
+	if (first ^) == nil_val {
+		(first ^) = n
+		(last  ^) = n
 		n.next = nil_val
 	}
 	else {
-		last^.next = n
-		last^      = n
-		n.next     = nil_val
+		(last ^).next = n
+		(last ^)      = n
+		n.next        = nil_val
 	}
 }
-sll_queue_push_n :: proc "contextless" (first: ^$SLL_NodeType, last: ^SLL_NodeType, n: ^SLL_NodeType) {
+sll_queue_push_n :: proc "contextless" (first: ^$Type, last, n: ^^Type) {
     sll_queue_push_nz(nil, first, last, n)
 }
 //#endregion("Memory")
@@ -719,7 +720,7 @@ varena_allocator_proc :: proc(input: AllocatorProc_In, output: ^AllocatorProc_Ou
 }
 //#endregion("VArena")
 
-//#region("Arena (Casey-Ryan Composite Arena")
+//#region("Arena (Casey-Ryan Composite Arena)")
 ArenaFlag :: enum u32 {
 	No_Large_Pages,
 	No_Chaining,
@@ -728,29 +729,187 @@ ArenaFlags :: bit_set[ArenaFlag; u32]
 Arena :: struct {
 	backing:  ^VArena,
 	prev:     ^Arena,
-	curr:     ^Arena,
-	base_pos:  int,
-	pos:       int,
-	flags:     ArenaFlags,
+	current:  ^Arena,
+	base_pos: int,
+	pos:      int,
+	flags:    ArenaFlags,
 }
-arena_make :: proc(reserve_size, commit_size: int, base_addr: int = 0, flags: ArenaFlags) -> ^Arena {
-	return nil
+
+arena_make :: proc(reserve_size, commit_size: int, base_addr: int = 0, flags: ArenaFlags = {}) -> ^Arena {
+	header_size := align_pow2(size_of(Arena), MEMORY_ALIGNMENT_DEFAULT)
+	current     := varena_make(reserve_size, commit_size, base_addr, transmute(VArenaFlags) flags)
+	assert(current != nil)
+
+	arena := varena_push(current, Arena, 1)
+	assert(len(arena) > 0)
+	arena[0] = Arena {
+		backing  = current,
+		prev     = nil,
+		current  = & arena[0],
+		base_pos = 0,
+		pos      = header_size,
+		flags    = flags,
+	}
+	return & arena[0]
 }
 arena_push :: proc(arena: ^Arena, $Type: typeid, amount: int, alignment: int = MEMORY_ALIGNMENT_DEFAULT) -> []Type {
-	return {}
+	assert(arena != nil)
+	active         := arena.current
+	size_requested := amount * size_of(Type)
+	size_aligned   := align_pow2(size_requested, alignment)
+	pos_pre        := active.pos
+	pos_pst        := pos_pre + size_aligned
+	should_chain   := (.No_Chaining not_in arena.flags) && (active.backing.reserve < pos_pst)	
+	if should_chain {
+		new_arena := arena_make(active.backing.reserve, active.backing.commit_size, 0, transmute(ArenaFlags) active.backing.flags)
+		new_arena.base_pos = active.base_pos + active.backing.reserve
+		sll_stack_push_n(& arena.current, & new_arena, & new_arena.prev)
+		new_arena.prev = active
+		active = arena.current
+	}
+	result_ptr := rawptr(uintptr(active) + uintptr(pos_pre))
+	vresult    := varena_push(active.backing, byte, size_aligned, alignment)
+	slice_assert(vresult)
+	assert(raw_data(vresult) == result_ptr)
+	active.pos = pos_pst
+	return transmute([]Type) Raw_Slice { data = result_ptr, len = amount }
 }
 arena_release :: proc(arena: ^Arena) {
+	assert(arena != nil)
+	curr := arena.current
+	for curr != nil {
+		prev := curr.prev
+		varena_release(curr.backing)
+		curr = prev
+	}
 }
 arena_reset :: proc(arena: ^Arena) {
+	arena_rewind(arena, AllocatorSP { type_sig = arena_allocator_proc, slot = 0 })
 }
 arena_rewind :: proc(arena: ^Arena, save_point: AllocatorSP) {
+	assert(arena != nil)
+	assert(save_point.type_sig == arena_allocator_proc)
+	header_size := align_pow2(size_of(Arena), MEMORY_ALIGNMENT_DEFAULT)
+	curr        := arena.current
+	big_pos     := max(header_size, save_point.slot)
+	// Release arenas that are beyond the save point
+	for curr.base_pos >= big_pos {
+		prev := curr.prev
+		varena_release(curr.backing)
+		curr = prev
+	}
+	arena.current = curr
+	new_pos      := big_pos - curr.base_pos
+	assert(new_pos <= curr.pos)
+	curr.pos = new_pos
+	varena_rewind(curr.backing, { type_sig = varena_allocator_proc, slot = curr.pos + size_of(VArena) })
 }
 arena_save :: proc(arena: ^Arena) -> AllocatorSP {
-	return {}
+	return { type_sig = arena_allocator_proc, slot = arena.base_pos + arena.current.pos }
 }
-arena_allocator_proc :: proc(input: AllocatorProc_In, output: AllocatorProc_Out) {
+arena_allocator_proc :: proc(input: AllocatorProc_In, output: ^AllocatorProc_Out) {
+	assert(output     != nil)
+	assert(input.data != nil)
+	arena := cast(^Arena) input.data
+	switch input.op
+	{
+	case .Alloc, .Alloc_NoZero:
+		output.allocation = slice_to_bytes(arena_push(arena, byte, input.requested_size, input.alignment))
+		if input.op == .Alloc {
+			zero(raw_data(output.allocation), len(output.allocation))
+		}
+		
+	case .Free:
+		// No-op for arena
+		
+	case .Reset:
+		arena_reset(arena)
+		
+	case .Grow, .Grow_NoZero:
+		active := arena.current
+		if len(input.old_allocation) == 0 {
+			output.allocation = {}
+			break
+		}
+		alloc_end := uintptr(raw_data(input.old_allocation)) + uintptr(len(input.old_allocation))
+		arena_end := uintptr(active) + uintptr(active.pos)
+		if alloc_end == arena_end
+		{
+			// Can grow in place
+			grow_amount := input.requested_size - len(input.old_allocation)
+			aligned_grow := align_pow2(grow_amount, input.alignment)
+			if active.pos + aligned_grow <= active.backing.reserve
+			{
+				vresult := varena_push(active.backing, byte, aligned_grow, input.alignment)
+				if len(vresult) > 0 {
+					active.pos += aligned_grow
+					output.allocation = transmute([]byte) Raw_Slice {
+						data = raw_data(input.old_allocation),
+						len = input.requested_size,
+					}
+					output.continuity_break = false
+					if input.op == .Grow {
+						zero(raw_data(output.allocation[len(input.old_allocation):]), grow_amount)
+					}
+					break
+				}
+			}
+		}
+		// Can't grow in place, allocate new
+		new_alloc := arena_push(arena, byte, input.requested_size, input.alignment)
+		if len(new_alloc) == 0 {
+			output.allocation = {}
+			break
+		}
+		copy(new_alloc, input.old_allocation)
+		if input.op == .Grow {
+			zero(raw_data(new_alloc[len(input.old_allocation):]), input.requested_size - len(input.old_allocation))
+		}
+		output.allocation = slice_to_bytes(new_alloc)
+		output.continuity_break = true
+		
+	case .Shrink:
+		active := arena.current
+		if len(input.old_allocation) == 0 {
+			output.allocation = {}
+			break
+		}
+		alloc_end := uintptr(raw_data(input.old_allocation)) + uintptr(len(input.old_allocation))
+		arena_end := uintptr(active) + uintptr(active.pos)
+		if alloc_end != arena_end {
+			// Not at the end, can't shrink but return adjusted size
+			output.allocation = transmute([]byte) Raw_Slice {
+				data = raw_data(input.old_allocation),
+				len = input.requested_size,
+			}
+			break
+		}
+		// Calculate shrinkage
+		aligned_original := align_pow2(len(input.old_allocation), MEMORY_ALIGNMENT_DEFAULT)
+		aligned_new      := align_pow2(input.requested_size, input.alignment)
+		pos_reduction    := aligned_original - aligned_new
+		active.pos       -= pos_reduction
+		varena_shrink(active.backing, input.old_allocation, input.requested_size, input.alignment)
+		output.allocation = transmute([]byte) Raw_Slice {
+			data = raw_data(input.old_allocation),
+			len  = input.requested_size,
+		}
+		
+	case .Rewind:
+		arena_rewind(arena, input.save_point)
+		
+	case .SavePoint:
+		output.save_point = arena_save(arena)
+		
+	case .Query:
+		output.features   = {.Alloc, .Grow, .Shrink, .Reset, .Rewind}
+		output.max_alloc  = arena.backing.reserve
+		output.min_alloc  = 4 * Kilo
+		output.left       = output.max_alloc - arena.backing.commit_used
+		output.save_point = arena_save(arena)
+	}
 }
-//#endregion("Arena (Casey-Ryan Composite Arena")
+//#endregion("Arena (Casey-Ryan Composite Arena)")
 
 //#region("Hashing")
 hash64_djb8 :: proc() {}
