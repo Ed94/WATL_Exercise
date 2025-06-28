@@ -36,6 +36,7 @@ copy_non_overlapping :: proc {
 }
 end :: proc {
 	slice_end,
+	string_end,
 }
 push :: proc {
 	farena_push,
@@ -327,6 +328,7 @@ Raw_String :: struct {
 	len:     int,
 }
 string_copy   :: proc(dst, src: string) { slice_copy  (transmute([]byte) dst, transmute([]byte) src) }
+string_end    :: proc(s: string) -> ^u8 { return slice_end (transmute([]byte) s) }
 string_assert :: proc(s: string)        { slice_assert(transmute([]byte) s) }
 //#endregion("Strings")
 
@@ -1220,6 +1222,25 @@ str8_fmt_kt1l :: proc(ainfo: AllocatorInfo, buffer: []byte, table: []KT1L_Slot(s
 	cursor_buffer    := uintptr(raw_data(buffer))
 	buffer_remaining := len(buffer)
 
+	curr_code  := fmt_template[0]
+	cursor_fmt := cast(uintptr) raw_data(fmt_template)
+	left_fmt   := len(fmt_template)
+	for ; left_fmt > 0 && buffer_remaining > 0;
+	{
+		// Forward until we hit the delimiter '<' or the template's contents are exhausted.
+		for ; curr_code != '<' && cursor_fmt != cast(uintptr) end(fmt_template); {
+			cursor_buffer     = cursor_fmt
+			cursor_buffer    += 1
+			cursor_fmt       += 1
+			buffer_remaining -= 1
+			left_fmt         -= 1
+			curr_code         = fmt_template[cursor_fmt]
+		}
+		if curr_code == '<'
+		{
+			
+		}
+	}
 	return {}
 }
 
