@@ -14,7 +14,7 @@ main :: proc()
 import "base:builtin"
 import "base:intrinsics"
 
-//#region("Package Mappings")
+//region Package Mappings
 abs   :: builtin.abs
 min   :: builtin.min
 max   :: builtin.max
@@ -69,9 +69,9 @@ watl_parse :: proc {
 	api_watl_parse,
 	watl_parse_stack,
 }
-//#endregion("Package Mappings")
+//endregion Package Mappings
 
-//#region("Memory")
+//region Memory
 Kilo :: 1024
 Mega :: Kilo * 1024
 Giga :: Mega * 1024
@@ -152,9 +152,9 @@ sll_queue_push_nz :: proc(nil_val: ^$Type, first, last, n: ^^Type) {
 sll_queue_push_n :: proc "contextless" (first: ^$Type, last, n: ^^Type) {
     sll_queue_push_nz(nil, first, last, n)
 }
-//#endregion("Memory")
+//endregion Memory
 
-//#region("Allocator Interface")
+//region Allocator Interface
 AllocatorOp :: enum u32 {
 	Alloc_NoZero = 0, // If Alloc exist, so must No_Zero
 	Alloc,
@@ -320,9 +320,9 @@ alloc_slice :: proc(ainfo: AllocatorInfo, $SliceType: []$Type, num : int) -> []T
 	ainfo.procedure(input, & output)
 	return transmute([]Type) Raw_Slice { raw_data(output.allocation), num }
 }
-//#endregion("Allocator Interface")
+//endregion Allocator Interface
 
-//#region("Strings")
+//region Strings
 Raw_String :: struct {
 	data: [^]byte,
 	len:     int,
@@ -330,9 +330,9 @@ Raw_String :: struct {
 string_copy   :: proc(dst, src: string) { slice_copy  (transmute([]byte) dst, transmute([]byte) src) }
 string_end    :: proc(s: string) -> ^u8 { return slice_end (transmute([]byte) s) }
 string_assert :: proc(s: string)        { slice_assert(transmute([]byte) s) }
-//#endregion("Strings")
+//endregion Strings
 
-//#region("FArena")
+//region FArena
 FArena :: struct {
 	mem:  []byte,
 	used:   int,
@@ -459,9 +459,9 @@ farena_allocator_proc :: proc(input: AllocatorProc_In, output: ^AllocatorProc_Ou
 		output.save_point = farena_save(arena^)
 	}
 }
-//#endregion("FArena")
+//endregion FArena
 
-//#region("OS")
+//region OS
 OS_SystemInfo :: struct {
 	target_page_size: int,
 }
@@ -553,9 +553,9 @@ os_vmem_reserve :: proc(size: int, base_addr: int = 0, no_large_pages: b32 = fal
 os_vmem_release :: proc(vm: rawptr, size: int) {
 	VirtualFree(vm, 0, MS_MEM_RELEASE)
 }
-//#endregion("OS")
+//endregion OS
 
-//#region("VArena")
+//region VArena
 VArenaFlag :: enum u32 {
 	No_Large_Pages,
 }
@@ -723,9 +723,9 @@ varena_allocator_proc :: proc(input: AllocatorProc_In, output: ^AllocatorProc_Ou
 		output.save_point = varena_save(vm)
 	}
 }
-//#endregion("VArena")
+//endregion VArena
 
-//#region("Arena (Casey-Ryan Composite Arena)")
+//region Arena (Casey-Ryan Composite Arena)
 ArenaFlag :: enum u32 {
 	No_Large_Pages,
 	No_Chaining,
@@ -914,18 +914,18 @@ arena_allocator_proc :: proc(input: AllocatorProc_In, output: ^AllocatorProc_Out
 		output.save_point = arena_save(arena)
 	}
 }
-//#endregion("Arena (Casey-Ryan Composite Arena)")
+//endregion Arena (Casey-Ryan Composite Arena)
 
-//#region("Hashing")
+//region Hashing
 hash64_djb8 :: proc(hash: ^u64, bytes: []byte) {
 	for elem in bytes {
 		// This hash is a 1:1 translation of the C version's hash.
 		hash^ = ((hash^ << 8) + hash^) + u64(elem)
 	}
 }
-//#endregion("Hashing")
+//endregion Hashing
 
-//#region("Key Table 1-Layer Linear (KT1L)")
+//region Key Table 1-Layer Linear (KT1L)
 KT1L_Slot :: struct($Type: typeid) {
 	key:   u64,
 	value: Type,
@@ -967,9 +967,9 @@ kt1l_populate_slice_a2 :: proc($Type: typeid, kt: ^[]KT1L_Slot(Type), backing: A
 		type_name       = #type_string(Type),
 	})
 }
-//#endregion("Key Table 1-Layer Linear (KT1L)")
+//endregion Key Table 1-Layer Linear (KT1L)
 
-//#region("Key Table 1-Layer Chained-Chunked-Cells (KT1CX)")
+//region Key Table 1-Layer Chained-Chunked-Cells (KT1CX)
 KT1CX_Slot :: struct($type: typeid) {
 	value:    type,
 	key:      u64,
@@ -1042,7 +1042,7 @@ kt1cx_clear :: proc(kt: KT1CX_Byte, m: KT1CX_ByteMeta) {
 		cell        := Raw_Slice { rawptr(cursor), m.cell_size }
 		slots       := Raw_Slice { cell.data,      m.cell_depth * m.slot_size }
 		slot_cursor := uintptr(slots.data)
-		for;; { defer{slot_cursor += uintptr(m.slot_size)} {
+		for;; {
 			slot := transmute([]byte) Raw_Slice { rawptr(slot_cursor), m.slot_size }
 			zero(slot)
 			if slot_cursor == cast(uintptr) end(transmute([]byte) slots) {
@@ -1053,7 +1053,8 @@ kt1cx_clear :: proc(kt: KT1CX_Byte, m: KT1CX_ByteMeta) {
 					continue
 				}
 			}
-		}}
+			slot_cursor += uintptr(m.slot_size)
+		}
 	}
 }
 kt1cx_slot_id :: proc(kt: KT1CX_Byte, key: u64, m: KT1CX_ByteMeta) -> u64 {
@@ -1067,7 +1068,7 @@ kt1cx_get :: proc(kt: KT1CX_Byte, key: u64, m: KT1CX_ByteMeta) -> ^byte {
 	{
 		slots       := Raw_Slice {cell.data, m.cell_depth * m.slot_size}
 		slot_cursor := uintptr(slots.data)
-		for;; { defer{slot_cursor += uintptr(m.slot_size)} 
+		for;; 
 		{
 			slot := transmute(^KT1CX_Byte_Slot) (slot_cursor + m.slot_key_offset)
 			if slot.occupied && slot.key == key {
@@ -1086,7 +1087,8 @@ kt1cx_get :: proc(kt: KT1CX_Byte, key: u64, m: KT1CX_ByteMeta) -> ^byte {
 					return nil
 				}
 			}
-		}}
+			slot_cursor += uintptr(m.slot_size)
+		}
 	}
 }
 kt1cx_set :: proc(kt: KT1CX_Byte, key: u64, value: []byte, backing_cells: AllocatorInfo, m: KT1CX_ByteMeta) -> ^byte {
@@ -1096,7 +1098,7 @@ kt1cx_set :: proc(kt: KT1CX_Byte, key: u64, value: []byte, backing_cells: Alloca
 	{
 		slots       := Raw_Slice {cell.data, m.cell_depth * m.slot_size}
 		slot_cursor := uintptr(slots.data)
-		for ;; { defer{slot_cursor += uintptr(m.slot_size)} 
+		for ;;
 		{
 			slot := transmute(^KT1CX_Byte_Slot) rawptr(slot_cursor + m.slot_key_offset)
 			if slot.occupied == false {
@@ -1124,7 +1126,8 @@ kt1cx_set :: proc(kt: KT1CX_Byte, key: u64, value: []byte, backing_cells: Alloca
 					return raw_data(new_cell)
 				}
 			}
-		}}
+			slot_cursor += uintptr(m.slot_size)
+		}
 		return nil
 	}
 }
@@ -1133,9 +1136,9 @@ kt1cx_assert :: proc(kt: $type / KT1CX) {
 	slice_assert(kt.table)
 }
 kt1cx_byte :: proc(kt: $type / KT1CX) -> KT1CX_Byte { return { slice_to_bytes(kt.cell_pool), slice_to_bytes(kt.table) } }
-//#endregion("Key Table 1-Layer Chained-Chunked-Cells (KT1CX)")
+//endregion Key Table 1-Layer Chained-Chunked-Cells (KT1CX)
 
-//#region("String Operations")
+//region String Operations
 char_is_upper :: proc(c: u8) -> b32 { return('A' <= c && c <= 'Z') }
 char_to_lower :: proc(c: u8) -> u8  { c:=c; if (char_is_upper(c)) { c += ('a' - 'A') }; return (c) }
 
@@ -1238,7 +1241,7 @@ str8_fmt_kt1l :: proc(ainfo: AllocatorInfo, buffer: []byte, table: []KT1L_Slot(s
 		}
 		if curr_code == '<'
 		{
-			
+
 		}
 	}
 	return {}
@@ -1296,9 +1299,9 @@ str8gen_append_str8 :: proc(gen: ^Str8Gen, str: string) {
 }
 str8gen_append_fmt :: proc(gen: ^Str8Gen, fmt_template: string, tokens: [][2]string) {
 }
-//#endregion("String Operations")
+//#endregion String Operations
 
-//#region("File System")
+//region File System
 FileOpInfo :: struct {
 	content: []byte,
 }
@@ -1307,9 +1310,9 @@ api_file_read_contents :: proc(result: ^FileOpInfo, path: string, backing: Alloc
 file_read_contents_stack :: proc(path: string, backing: AllocatorInfo, zero_backing: b32 = false) -> FileOpInfo {
 	return {}
 }
-//#endregion("File System")
+//endregion File System
 
-//#region("WATL")
+//region WATL
 WATL_TokKind :: enum u32 {
 	Space           = ' ',
 	Tab             = '\t',
@@ -1390,4 +1393,4 @@ watl_parse_stack :: proc(tokens: []WATL_Tok,
 {
 	return
 }
-//#endregion("WATL")
+//endregion WATL
