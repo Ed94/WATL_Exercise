@@ -7,6 +7,7 @@ Toolchain: MSVC 19.43, C-Stanard: 11
 
 #pragma warning(disable: 4100)
 #pragma warning(disable: 4127)
+#pragma warning(disable: 4189)
 #pragma warning(disable: 4201)
 #pragma warning(disable: 4702)
 #pragma warning(disable: 4710)
@@ -890,11 +891,10 @@ void farena_allocator_proc(AllocatorProc_In in, AllocatorProc_Out* out)
 				out->allocation = (Slice_Byte){0};
 				break;
 			}
-
 			// Calculate growth
-			SSIZE grow_amount = in.requested_size - in.old_allocation.len;
+			SSIZE grow_amount  = in.requested_size - in.old_allocation.len;
 			SSIZE aligned_grow = align_pow2(grow_amount, in.alignment ? in.alignment : MEMORY_ALIGNMENT_DEFAULT);
-			SSIZE unused = arena->capacity - arena->used;
+			SSIZE unused       = arena->capacity - arena->used;
 			if (aligned_grow > unused) {
 				// Not enough space
 				out->allocation = (Slice_Byte){0};
@@ -915,7 +915,6 @@ void farena_allocator_proc(AllocatorProc_In in, AllocatorProc_Out* out)
 				out->allocation = (Slice_Byte){in.old_allocation.ptr, in.requested_size};
 				break;
 			}
-
 			// Calculate shrinkage
 			//SSIZE shrink_amount    = in.old_allocation.len - in.requested_size;
 			SSIZE aligned_original = align_pow2(in.old_allocation.len, MEMORY_ALIGNMENT_DEFAULT);
@@ -1293,7 +1292,7 @@ void arena_allocator_proc(AllocatorProc_In in, AllocatorProc_Out* out)
 
 		case AllocatorOp_Grow:
 		case AllocatorOp_Grow_NoZero: {
-			Arena* active = arena->current;
+			Arena* active   = arena->current;
 			Byte* alloc_end = in.old_allocation.ptr + in.old_allocation.len;
 			Byte* arena_end = cast(Byte*, active) + active->pos;
 			if (alloc_end == arena_end)
@@ -1399,18 +1398,18 @@ void kt1cx_init(KT1CX_Info info, KT1CX_InfoMeta m, KT1CX_Byte* result) {
 	assert(m.table_size     >= kilo(4));
 	assert(m.type_width     >  0);
 	result->table     = mem_alloc(info.backing_table, m.table_size * m.cell_size);
+	slice_assert(result->table);
 	result->cell_pool = mem_alloc(info.backing_cells, m.cell_size  * m.cell_pool_size);
+	slice_assert(result->cell_pool);
 	result->table.len = m.table_size; // Setting to the table number of elements instead of byte length.
 }
 void kt1cx_clear(KT1CX_Byte kt, KT1CX_ByteMeta m) {
-	Byte* cursor    = kt.table.ptr;
-	SSIZE num_cells = kt.table.len;
-	kt.table.len   *= m.cell_size; // Temporarily convert length to byte size.
-	for (; cursor != slice_end(kt.table); cursor += m.cell_size )
+	Byte* cell_cursor = kt.table.ptr;
+	SSIZE table_len   = kt.table.len * m.cell_size;
+	for (; cell_cursor != slice_end(kt.table); cell_cursor += m.cell_size )          // for cell in kt.table.cells
 	{
-		Slice_Byte cell   = {cursor, m.cell_size};                   // kt.table + id
-		Slice_Byte slots  = {cell.ptr, m.cell_depth * m.slot_size }; // slots = kt.table[id]
-		Byte* slot_cursor = slots.ptr;
+		Slice_Byte slots       = {cell_cursor, m.cell_depth * m.slot_size }; // slots = cell.slots
+		Byte*      slot_cursor = slots.ptr;
 		for (; slot_cursor < slice_end(slots); slot_cursor += m.slot_size) {
 		process_slots:
 			Slice_Byte slot = {slot_cursor, m.slot_size}; // slot = slots[id]
@@ -1423,7 +1422,6 @@ void kt1cx_clear(KT1CX_Byte kt, KT1CX_ByteMeta m) {
 			goto process_slots;
 		}
 	}
-	kt.table.len = num_cells; // Restore to type-based length.
 }
 inline
 U64 kt1cx_slot_id(KT1CX_Byte kt, U64 key, KT1CX_ByteMeta m) {
