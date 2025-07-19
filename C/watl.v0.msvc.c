@@ -450,7 +450,7 @@ void kt1l__populate_slice_a2(KT1L_Byte* kt, AllocatorInfo backing, KT1L_Meta m, 
 	cast(KT1L_Byte*, kt),                                        \
 	ainfo,                                                       \
 	(KT1L_Meta){                                                 \
-		.slot_size       = size_of(KT1L_Slot_Str8),                \
+		.slot_size       = size_of(tmpl(KT1L_Slot,type)),          \
 		.kt_value_offset = offset_of(tmpl(KT1L_Slot,type), value), \
 		.type_width      = size_of(type),                          \
 		.type_name       = lit(stringify(type))                    \
@@ -1085,7 +1085,7 @@ Slice_Byte varena__push(VArena* vm, SSIZE amount, SSIZE type_width, Opts_varena*
 	SSIZE current_offset = vm->reserve_start + vm->commit_used;
 	SSIZE to_be_used     = vm->commit_used   + aligned_size;
 	SSIZE reserve_left   = vm->reserve       - vm->commit_used;
-	SSIZE commit_left    = vm->committed - vm->commit_used;
+	SSIZE commit_left    = vm->committed     - vm->commit_used;
 	B32   exhausted      = commit_left < to_be_used;
 	assert(to_be_used < reserve_left);
 	if (exhausted)
@@ -1196,7 +1196,7 @@ void varena_allocator_proc(AllocatorProc_In in, AllocatorProc_Out* out)
 }
 #pragma endregion VArena
 
-#pragma region Arena (Casey-Ryan Composite Arena)
+#pragma region Arena (Chained Arena)
 inline
 Arena* arena__make(Opts_arena_make* opts) {
 	assert(opts != nullptr);
@@ -1386,7 +1386,7 @@ void kt1l__populate_slice_a2(KT1L_Byte* kt, AllocatorInfo backing, KT1L_Meta m, 
 	}
 	kt->len = num_values;
 }
-#pragma endregion KT1l
+#pragma endregion KT1L
 
 #pragma region Key Table 1-Layer Chained-Chunked_Cells (KT1CX)
 inline
@@ -1663,14 +1663,14 @@ Str8 str8__fmt_kt1l(AllocatorInfo ainfo, Slice_Byte buffer, KT1L_Str8 table, Str
 inline
 Str8 str8__fmt_backed(AllocatorInfo tbl_backing, AllocatorInfo buf_backing, Str8 fmt_template, Slice_A2_Str8* entries) {
 	KT1L_Str8 kt; kt1l_populate_slice_a2(Str8, & kt, tbl_backing, *entries );
-	SSIZE buf_size = kilo(32);
+	SSIZE buf_size = kilo(64);
 	Slice_Byte buffer = mem_alloc(buf_backing, buf_size);
 	Str8       result = str8__fmt_kt1l(buf_backing, buffer, kt, fmt_template);
 	return     result;
 }
 Str8 str8__fmt(Str8 fmt_template, Slice_A2_Str8* entries) {
 	local_persist Byte tbl_mem[kilo(32)];  FArena tbl_arena = farena_make(slice_fmem(tbl_mem));
-	local_persist Byte buf_mem[kilo(128)];
+	local_persist Byte buf_mem[kilo(64)];
 	KT1L_Str8 kt = {0}; kt1l_populate_slice_a2(Str8, & kt, ainfo_farena(tbl_arena), *entries );
 	Str8   result = str8__fmt_kt1l((AllocatorInfo){0}, slice_fmem(buf_mem), kt, fmt_template);
 	return result;
