@@ -1429,11 +1429,11 @@ U64 kt1cx_slot_id(KT1CX_Byte kt, U64 key, KT1CX_ByteMeta m) {
 	return hash_index;
 }
 Byte* kt1cx__get(KT1CX_Byte kt, U64 key, KT1CX_ByteMeta m) {
-	U64        hash_index  = kt1cx_slot_id(kt, key, m);
-	SSIZE      cell_offset = hash_index * m.cell_size;
-	Slice_Byte cell        = { & kt.table.ptr[cell_offset], m.cell_size}; // KT1CX_Cell_<Type> cell = kt.table[hash_index]
+	U64   hash_index  = kt1cx_slot_id(kt, key, m);
+	SSIZE cell_offset = hash_index * m.cell_size;
+	Byte* cell_cursor = & kt.table.ptr[cell_offset]; // KT1CX_Cell_<Type> cell = kt.table[hash_index]
 	{
-		Slice_Byte slots       = {cell.ptr, m.cell_depth * m.slot_size}; // KT1CX_Slot_<Type>[kt.cell_depth] slots = cell.slots
+		Slice_Byte slots       = {cell_cursor, m.cell_depth * m.slot_size}; // KT1CX_Slot_<Type>[kt.cell_depth] slots = cell.slots
 		Byte*      slot_cursor = slots.ptr;
 		for (; slot_cursor != slice_end(slots); slot_cursor += m.slot_size) {
 		process_slots:
@@ -1442,11 +1442,11 @@ Byte* kt1cx__get(KT1CX_Byte kt, U64 key, KT1CX_ByteMeta m) {
 				return slot_cursor;
 			}
 		}
-		Byte* cell_next = cell.ptr + m.cell_next_offset; // cell.next
+		Byte* cell_next = cell_cursor + m.cell_next_offset; // cell.next
 		if (cell_next != nullptr) {
 			slots.ptr   = cell_next; // slots = cell_next
 			slot_cursor = cell_next;
-			cell.ptr    = cell_next; // cell = cell_next
+			cell_cursor = cell_next; // cell = cell_next
 			goto process_slots;
 		}
 		else {
@@ -1456,11 +1456,11 @@ Byte* kt1cx__get(KT1CX_Byte kt, U64 key, KT1CX_ByteMeta m) {
 }
 inline
 Byte* kt1cx_set(KT1CX_Byte kt, U64 key, Slice_Byte value, AllocatorInfo backing_cells, KT1CX_ByteMeta m) {
-	U64        hash_index  = kt1cx_slot_id(kt, key, m);
-	SSIZE      cell_offset = hash_index * m.cell_size;
-	Slice_Byte cell        = { & kt.table.ptr[cell_offset], m.cell_size}; // KT1CX_Cell_<Type> cell = kt.table[hash_index]
+	U64   hash_index  = kt1cx_slot_id(kt, key, m);
+	SSIZE cell_offset = hash_index * m.cell_size;
+	Byte* cell_cursor = & kt.table.ptr[cell_offset]; // KT1CX_Cell_<Type> cell = kt.table[hash_index]
 	{
-		Slice_Byte slots       = {cell.ptr, m.cell_depth * m.slot_size}; // cell.slots
+		Slice_Byte slots       = {cell_cursor, m.cell_depth * m.slot_size}; // cell.slots
 		Byte*      slot_cursor = slots.ptr;
 		for (; slot_cursor != slice_end(slots); slot_cursor += m.slot_size) {
 		process_slots:
@@ -1474,11 +1474,11 @@ Byte* kt1cx_set(KT1CX_Byte kt, U64 key, Slice_Byte value, AllocatorInfo backing_
 				return slot_cursor;
 			}
 		}
-		KT1CX_Byte_Cell curr_cell = { cell.ptr + m.cell_next_offset }; // curr_cell = cell
+		KT1CX_Byte_Cell curr_cell = { cell_cursor + m.cell_next_offset }; // curr_cell = cell
 		if ( curr_cell.next != nullptr) {
 			slots.ptr   = curr_cell.next;
 			slot_cursor = curr_cell.next;
-			cell.ptr    = curr_cell.next;
+			cell_cursor = curr_cell.next;
 			goto process_slots;
 		}
 		else {
@@ -1578,8 +1578,10 @@ Str8 str8_from_u32(AllocatorInfo ainfo, U32 num, U32 radix, U8 min_digits, U8 di
 	}
 	return result;
 }
-Str8 str8__fmt_kt1l(AllocatorInfo ainfo, Slice_Byte buffer, KT1L_Str8 table, Str8 fmt_template)
+Str8 str8__fmt_kt1l(AllocatorInfo ainfo, Slice_Byte* _buffer, KT1L_Str8 table, Str8 fmt_template)
 {
+	assert(_buffer != nullptr);
+	Slice_Byte buffer = *_buffer;
 	slice_assert(buffer);
 	slice_assert(table);
 	slice_assert(fmt_template);
@@ -1615,7 +1617,7 @@ Str8 str8__fmt_kt1l(AllocatorInfo ainfo, Slice_Byte buffer, KT1L_Str8 table, Str
 			}
 			if (fmt_overflow) continue;
 			// Hashing the potential token and cross checking it with our token table
-			U64   key   = 0; hash64_djb8(& key, (Slice_Byte){ cast(void*, cursor_fmt + 1), potential_token_length});
+			U64   key   = 0; hash64_djb8(& key, (Slice_Byte){ cast(Byte*, cursor_potential_token), potential_token_length});
 			Str8* value = nullptr;
 			for (slice_iter(table, token))
 			{
@@ -1629,7 +1631,8 @@ Str8 str8__fmt_kt1l(AllocatorInfo ainfo, Slice_Byte buffer, KT1L_Str8 table, Str
 			{
 				// We're going to appending the string, make sure we have enough space in our buffer.
 				if (ainfo.proc != nullptr && (buffer_remaining - potential_token_length) <= 0) {
-					buffer = mem_grow(ainfo, buffer, buffer.len + potential_token_length);
+					buffer            = mem_grow(ainfo, buffer, buffer.len + potential_token_length);
+					buffer_remaining += potential_token_length;
 				}
 				SSIZE left         = value->len;
 				U8*   cursor_value = value->ptr;
@@ -1655,6 +1658,7 @@ Str8 str8__fmt_kt1l(AllocatorInfo ainfo, Slice_Byte buffer, KT1L_Str8 table, Str
 			curr_code = * cursor_fmt;
 		}
 	}
+	* _buffer = buffer;
 	Str8   result = {buffer.ptr, buffer.len - buffer_remaining};
 	return result;
 }
@@ -1663,14 +1667,14 @@ Str8 str8__fmt_backed(AllocatorInfo tbl_backing, AllocatorInfo buf_backing, Str8
 	KT1L_Str8 kt; kt1l_populate_slice_a2(Str8, & kt, tbl_backing, *entries );
 	SSIZE buf_size = kilo(64);
 	Slice_Byte buffer = mem_alloc(buf_backing, buf_size);
-	Str8       result = str8__fmt_kt1l(buf_backing, buffer, kt, fmt_template);
+	Str8       result = str8__fmt_kt1l(buf_backing, & buffer, kt, fmt_template);
 	return     result;
 }
 Str8 str8__fmt(Str8 fmt_template, Slice_A2_Str8* entries) {
 	local_persist Byte tbl_mem[kilo(32)];  FArena tbl_arena = farena_make(slice_fmem(tbl_mem));
 	local_persist Byte buf_mem[kilo(64)];
 	KT1L_Str8 kt = {0}; kt1l_populate_slice_a2(Str8, & kt, ainfo_farena(tbl_arena), *entries );
-	Str8   result = str8__fmt_kt1l((AllocatorInfo){0}, slice_fmem(buf_mem), kt, fmt_template);
+	Str8   result = str8__fmt_kt1l((AllocatorInfo){0}, & slice_fmem(buf_mem), kt, fmt_template);
 	return result;
 }
 inline
@@ -1792,7 +1796,7 @@ void str8gen__append_fmt(Str8Gen* gen, Str8 fmt_template, Slice_A2_Str8* entries
 		gen->cap = result.len;
 		buffer = (Slice_Byte){ cast(Byte*, gen->ptr + gen->len), gen->cap - gen->len };
 	}
-	Str8 result = str8__fmt_kt1l(gen->backing, buffer, kt, fmt_template);
+	Str8 result = str8__fmt_kt1l(gen->backing, & buffer, kt, fmt_template);
 	gen->len += result.len;
 }
 #pragma endregion String Operations

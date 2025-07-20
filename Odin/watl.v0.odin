@@ -1007,26 +1007,24 @@ kt1cx_init :: proc(info: KT1CX_Info, m: KT1CX_InfoMeta, result: ^KT1CX_Byte) {
 	result.table  = transmute([]byte) table_raw
 }
 kt1cx_clear :: proc(kt: KT1CX_Byte, m: KT1CX_ByteMeta) {
-	cursor    := cursor(kt.table)
-	num_cells := len(kt.table)
-	table_len := len(kt.table) * m.cell_size
-	for ; cursor != end(kt.table); cursor = cursor[m.cell_size:] // for cell in kt.table.cells
+	cell_cursor := cursor(kt.table)
+	table_len   := len(kt.table) * m.cell_size
+	for ; cell_cursor != end(kt.table); cell_cursor = cell_cursor[m.cell_size:] // for cell, cell_id in kt.table.cells
 	{
-		cell_cursor := cursor
-		slots       := SliceBytes { cell.data, m.cell_depth * m.slot_size } // slots = cell.slots
+		slots       := SliceBytes { cell_cursor, m.cell_depth * m.slot_size } // slots = cell.slots
 		slot_cursor := slots.data
 		for;; {
-			slot := transmute([]byte) SliceBytes { slot_cursor, m.slot_size }
-			zero(slot)
-			if slot_cursor == end(transmute([]byte) slots) {
-				next := slot_cursor[m.cell_next_offset:]
-				if next != nil {
-					slots.data  = next
+			slot := slice(slot_cursor, m.slot_size)          // slot = slots[slot_id]
+			zero(slot)                                       // slot = {}
+			if slot_cursor == end(transmute([]byte) slots) { // if slot == end(slot)
+				next := slot_cursor[m.cell_next_offset:]       // next = kt.table.cells[cell_id + 1]
+				if next != nil {                               // if next != nil
+					slots.data  = next                           // slots = next.slots
 					slot_cursor = next
 					continue
 				}
 			}
-			slot_cursor = slot_cursor[m.slot_size:]
+			slot_cursor = slot_cursor[m.slot_size:]          // slot = slots[slot_id + 1]
 		}
 	}
 }
@@ -1049,11 +1047,11 @@ kt1cx_get :: proc(kt: KT1CX_Byte, key: u64, m: KT1CX_ByteMeta) -> ^byte {
 			}
 			if slot_cursor == end(transmute([]byte) slots)
 			{
-				cell_next := cell_cursor[m.cell_next_offset:]
+				cell_next := cell_cursor[m.cell_next_offset:] // cell.next
 				if cell_next != nil {
-					slots       = slice(cell_next, len(slots))
+					slots       = slice(cell_next, len(slots)) // slots = cell.next
 					slot_cursor = cell_next
-					cell_cursor = cell_next
+					cell_cursor = cell_next                    // cell = cell.next
 					continue
 				}
 				else {
@@ -1070,10 +1068,10 @@ kt1cx_set :: proc(kt: KT1CX_Byte, key: u64, value: []byte, backing_cells: Alloca
 	cell        := SliceBytes{& kt.table[cell_offset], m.cell_size}
 	{
 		slots       := SliceBytes {cell.data, m.cell_depth * m.slot_size}
-		slot_cursor := uintptr(slots.data)
+		slot_cursor := slots.data
 		for ;;
 		{
-			slot := transmute(^KT1CX_Byte_Slot) rawptr(slot_cursor + m.slot_key_offset)
+			slot := transmute(^KT1CX_Byte_Slot) slot_cursor[m.slot_key_offset:]
 			if slot.occupied == false {
 				slot.occupied = true
 				slot.key      = key
@@ -1082,24 +1080,24 @@ kt1cx_set :: proc(kt: KT1CX_Byte, key: u64, value: []byte, backing_cells: Alloca
 			else if slot.key == key {
 				return cast(^byte) slot_cursor
 			}
-			if slot_cursor == uintptr(end(transmute([]byte) slots)) {
+			if slot_cursor == end(transmute([]byte) slots) {
 				curr_cell := transmute(^KT1CX_Byte_Cell) (uintptr(cell.data) + m.cell_next_offset)
 				if curr_cell != nil {
 					slots.data  = curr_cell.next
-					slot_cursor = uintptr(curr_cell.next)
+					slot_cursor = curr_cell.next
 					cell.data   = curr_cell.next
 					continue
 				}
 				else {
 					new_cell       := mem_alloc(backing_cells, m.cell_size)
 					curr_cell.next  = raw_data(new_cell)
-					slot            = transmute(^KT1CX_Byte_Slot) rawptr(uintptr(raw_data(new_cell)) + m.slot_key_offset)
+					slot            = transmute(^KT1CX_Byte_Slot) cursor(new_cell)[m.slot_key_offset:]
 					slot.occupied   = true
 					slot.key        = key
 					return raw_data(new_cell)
 				}
 			}
-			slot_cursor += uintptr(m.slot_size)
+			slot_cursor = slot_cursor[m.slot_size:]
 		}
 		return nil
 	}
@@ -1188,36 +1186,88 @@ str8_from_u32 :: proc(ainfo: AllocatorInfo, num: u32, radix: u32 = 10, min_digit
 	return result
 }
 
-str8_fmt_kt1l :: proc(ainfo: AllocatorInfo, buffer: []byte, table: []KT1L_Slot(string), fmt_template: string) -> string {
+str8_fmt_kt1l :: proc(ainfo: AllocatorInfo, _buffer: ^[]byte, table: []KT1L_Slot(string), fmt_template: string) -> string {
+	buffer := _buffer^
 	slice_assert(buffer)
 	slice_assert(table)
 	string_assert(fmt_template)
 	if ainfo.procedure != nil {
 		assert(.Grow in allocator_query(ainfo).features)
 	}
-	cursor_buffer    := transmute(uintptr) raw_data(buffer)
+	cursor_buffer    := cursor(buffer)
 	buffer_remaining := len(buffer)
 
 	curr_code  := fmt_template[0]
-	cursor_fmt := transmute(uintptr) raw_data(fmt_template)
+	cursor_fmt := cursor(transmute([]u8) fmt_template)
 	left_fmt   := len(fmt_template)
 	for ; left_fmt > 0 && buffer_remaining > 0;
 	{
 		// Forward until we hit the delimiter '<' or the template's contents are exhausted.
-		for ; curr_code != '<' && cursor_fmt != cast(uintptr) end(fmt_template); {
+		for ; curr_code != '<' && cursor_fmt != end(fmt_template); {
 			cursor_buffer     = cursor_fmt
-			cursor_buffer    += 1
-			cursor_fmt       += 1
+			cursor_buffer     = cursor_buffer[1:]
+			cursor_fmt        = cursor_fmt   [1:]
+			curr_code         = cursor_fmt   [0]
 			buffer_remaining -= 1
 			left_fmt         -= 1
-			curr_code         = fmt_template[cursor_fmt]
 		}
 		if curr_code == '<'
 		{
-			// cursor_potential_token := transmute([^]u8) (cursor_fmt + 1)
+			cursor_potential_token := cursor_fmt[1:]
+			potential_token_length := 0
+			fmt_overflow           := b32(false)
+			for ;; {
+				cursor      := cursor_potential_token[potential_token_length:]
+				fmt_overflow = cursor >= end(fmt_template)
+				found_terminator := cast(b32) (cursor_potential_token[potential_token_length] == '>')
+				if fmt_overflow || found_terminator do break
+				potential_token_length += 1
+			}
+			if fmt_overflow do continue
+			// Hashing the potential token and cross checking it with our token table
+			key   : u64     = 0; hash64_djb8(& key, slice(cursor_fmt, potential_token_length))
+			value : ^string = nil
+			for & token in table 
+			{
+				// We do a linear iteration instead of a hash table lookup because the user should be never substiuting with more than 100 unqiue tokens..
+				if (token.key == key) {
+					value = & token.value
+					break
+				}
+			}
+			if value != nil 
+			{
+				// We're going to appending the string, make sure we have enough space in our buffer.
+				if ainfo.procedure != nil && (buffer_remaining - potential_token_length) <= 0 {
+					buffer            = mem_grow(ainfo, buffer, len(buffer) + potential_token_length)
+					buffer_remaining += potential_token_length
+				}
+				left         := len(value)
+				cursor_value := cursor(transmute([]u8) value^)
+				for ; left > 0 && buffer_remaining > 0; {
+					cursor_buffer     = cursor_value
+					cursor_buffer     = cursor_buffer[1:]
+					cursor_fmt        = cursor_fmt   [1:]
+					buffer_remaining -= 1
+					left_fmt         -= 1
+				}
+				// Sync cursor format to after the processed token
+				cursor_fmt = cursor_potential_token[potential_token_length + 1:]
+				curr_code  = cursor_fmt[0]
+				left_fmt  -= potential_token_length + 2 // The 2 here are the '<' & '>' delimiters being omitted.
+				continue
+			}
+			cursor_buffer     = cursor_fmt
+			cursor_buffer     = cursor_buffer[1:]
+			cursor_fmt        = cursor_fmt   [1:]
+			curr_code         = cursor_fmt   [0]
+			buffer_remaining -= 1
+			left_fmt         -= 1
 		}
 	}
-	return {}
+	_buffer ^ = buffer
+	result := transmute(string) slice(cursor(buffer), len(buffer) - buffer_remaining)
+	return result
 }
 
 str8_fmt_backed :: proc(tbl_ainfo, buf_ainfo: AllocatorInfo, fmt_template: string, entries: [][2]string) -> string {
