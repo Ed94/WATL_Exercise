@@ -13,6 +13,7 @@ main :: proc()
 
 import "base:builtin"
 import "base:intrinsics"
+import "base:runtime"
 
 //region Package Mappings
 abs   :: builtin.abs
@@ -20,6 +21,11 @@ min   :: builtin.min
 max   :: builtin.max
 clamp :: builtin.clamp
 
+ainfo :: proc {
+	farena_ainfo,
+	varena_ainfo,
+	arena_ainfo,
+}
 alloc :: proc {
 	mem_alloc,
 	alloc_type,
@@ -109,11 +115,11 @@ memory_copy_non_overlapping :: proc "contextless" (dst, src: rawptr, len: int) -
 	return dst
 }
 
-SliceBytes :: struct {
+SliceByte :: struct {
 	data: [^]byte,
 	len: int
 }
-SliceRaw :: struct ($Type: typeid) {
+SliceRaw  :: struct ($Type: typeid) {
 	data: [^]Type,
 	len:  int,
 }
@@ -125,8 +131,8 @@ slice_assert :: #force_inline proc (s: $SliceType / []$Type) {
 }
 slice_end :: #force_inline proc "contextless" (s : $SliceType / []$Type) -> ^Type { return & s[len(s) - 1] }
 
-@(require_results) slice_to_bytes :: proc "contextless" (s: []$Type) -> []byte { return ([^]byte)(raw_data(s))[:len(s) * size_of(Type)] }
-@(require_results) slice_raw :: proc "contextless" (s: []$Type) -> SliceRaw(Type) { return transmute(SliceRaw(Type)) s }
+@(require_results) slice_to_bytes :: proc "contextless" (s: []$Type) -> []byte         { return ([^]byte)(raw_data(s))[:len(s) * size_of(Type)] }
+@(require_results) slice_raw      :: proc "contextless" (s: []$Type) -> SliceRaw(Type) { return transmute(SliceRaw(Type)) s }
 
 slice_zero :: proc "contextless" (data: $SliceType / []$Type) { zero(raw_data(data), size_of(Type) * len(data)) }
 slice_copy :: proc "contextless" (dst, src: $SliceType / []$Type) -> int {
@@ -319,7 +325,7 @@ alloc_type  :: proc(ainfo: AllocatorInfo, $Type: typeid, alignment: int = MEMORY
 	ainfo.procedure(input, & output)
 	return transmute(^Type) raw_data(output.allocation)
 }
-alloc_slice :: proc(ainfo: AllocatorInfo, $SliceType: []$Type, num : int) -> []Type {
+alloc_slice :: proc(ainfo: AllocatorInfo, $SliceType: typeid / []$Type, num : int, alignment: int = MEMORY_ALIGNMENT_DEFAULT, no_zero: b32 = false) -> []Type {
 	assert(ainfo.procedure != nil)
 	input := AllocatorProc_In {
 		data           = ainfo.data,
@@ -329,7 +335,7 @@ alloc_slice :: proc(ainfo: AllocatorInfo, $SliceType: []$Type, num : int) -> []T
 	}
 	output: AllocatorProc_Out
 	ainfo.procedure(input, & output)
-	return transmute([]Type) Raw_Slice { raw_data(output.allocation), num }
+	return transmute([]Type) slice(raw_data(output.allocation), num)
 }
 //endregion Allocator Interface
 
@@ -459,6 +465,7 @@ farena_allocator_proc :: proc(input: AllocatorProc_In, output: ^AllocatorProc_Ou
 		output.save_point = farena_save(arena^)
 	}
 }
+farena_ainfo :: #force_inline proc "contextless" (arena : ^FArena) -> AllocatorInfo { return AllocatorInfo{farena_allocator_proc, arena} }
 //endregion FArena
 
 //region OS
@@ -709,6 +716,7 @@ varena_allocator_proc :: proc(input: AllocatorProc_In, output: ^AllocatorProc_Ou
 		output.save_point = varena_save(vm)
 	}
 }
+varena_ainfo :: #force_inline proc "contextless" (arena : ^VArena) -> AllocatorInfo { return AllocatorInfo{varena_allocator_proc, arena} }
 //endregion VArena
 
 //region Arena (Chained Arena)
@@ -850,7 +858,7 @@ arena_allocator_proc :: proc(input: AllocatorProc_In, output: ^AllocatorProc_Out
 		if input.op == .Grow {
 			zero(cursor(new_alloc)[len(input.old_allocation):], input.requested_size - len(input.old_allocation))
 		}
-		output.allocation       = slice_to_bytes(new_alloc)
+		output.allocation       = new_alloc
 		output.continuity_break = true
 		
 	case .Shrink:
@@ -888,6 +896,7 @@ arena_allocator_proc :: proc(input: AllocatorProc_In, output: ^AllocatorProc_Out
 		output.save_point = arena_save(arena)
 	}
 }
+arena_ainfo :: #force_inline proc "contextless" (arena : ^Arena) -> AllocatorInfo { return AllocatorInfo{arena_allocator_proc, arena} }
 //endregion Arena (Casey-Ryan Composite Arena)
 
 //region Hashing
@@ -907,7 +916,7 @@ KT1L_Meta :: struct {
 	slot_size:       uintptr,
 	kt_value_offset: uintptr,
 	type_width:      uintptr,
-	type_name:       string,
+	type:            typeid,
 }
 kt1l_populate_slice_a2_Slice_Byte :: proc(kt: ^[]byte, backing: AllocatorInfo, values: []byte, num_values: int, m: KT1L_Meta) {
 	assert(kt != nil)
@@ -915,14 +924,14 @@ kt1l_populate_slice_a2_Slice_Byte :: proc(kt: ^[]byte, backing: AllocatorInfo, v
 	table_size_bytes := num_values * int(m.slot_size)
 	kt^               = mem_alloc(backing, table_size_bytes)
 	slice_assert(kt ^)
-	kt_raw : SliceBytes = transmute(SliceBytes) kt^
-	for cursor in 0 ..< cast(uintptr) num_values {
-		slot_offset := cursor * m.slot_size                                 // slot id
+	kt_raw : SliceByte = transmute(SliceByte) kt^
+	for id in 0 ..< cast(uintptr) num_values {
+		slot_offset := id * m.slot_size                                     // slot id
 		slot_cursor := kt_raw.data[slot_offset:]                            // slots[id]            type: KT1L_<Type>
 		slot_key    := cast(^u64) slot_cursor                               // slots[id].key        type: U64
 		slot_value  := slice(slot_cursor[m.kt_value_offset:], m.type_width) // slots[id].value      type: <Type>
-		a2_offset   := cursor * m.type_width * 2                            // a2 entry id
-		a2_cursor   := slice_cursor(values)[a2_offset:]                     // a2_entries[id]       type: A2_<Type>
+		a2_offset   := id * m.type_width * 2                                // a2 entry id
+		a2_cursor   := cursor(values)[a2_offset:]                           // a2_entries[id]       type: A2_<Type>
 		a2_key      := (transmute(^[]byte) a2_cursor) ^                     // a2_entries[id].key   type: <Type>
 		a2_value    := slice(a2_cursor[m.type_width:], m.type_width)        // a2_entries[id].value type: <Type>
 		copy(slot_value, a2_value)                                          // slots[id].value = a2_entries[id].value
@@ -932,12 +941,12 @@ kt1l_populate_slice_a2_Slice_Byte :: proc(kt: ^[]byte, backing: AllocatorInfo, v
 }
 kt1l_populate_slice_a2 :: proc($Type: typeid, kt: ^[]KT1L_Slot(Type), backing: AllocatorInfo, values: [][2]Type) {
 	assert(kt != nil)
-	values_bytes := transmute([]byte) SliceBytes{data = raw_data(values), len = len(values) * size_of([2]Type)}
+	values_bytes := slice(transmute([^]u8) raw_data(values), len(values) * size_of([2]Type))
 	kt1l_populate_slice_a2_Slice_Byte(transmute(^[]byte) kt, backing, values_bytes, len(values), {
 		slot_size       = size_of(KT1L_Slot(Type)),
-		kt_value_offset = offset_of(KT1L_Slot(Type), KT1L_Slot(Type).value),
+		kt_value_offset = offset_of(KT1L_Slot(Type), value),
 		type_width      = size_of(Type),
-		type_name       = #type_string(Type),
+		type            = Type,
 	})
 }
 //endregion Key Table 1-Layer Linear (KT1L)
@@ -974,7 +983,7 @@ KT1CX_ByteMeta :: struct {
 	cell_depth:       int,
 	cell_size:        int,
 	type_width:       int,
-	type_name:        string,
+	type:             typeid,
 }
 KT1CX_InfoMeta :: struct {
 	cell_pool_size:   int,
@@ -985,7 +994,7 @@ KT1CX_InfoMeta :: struct {
 	cell_depth:       int,
 	cell_size:        int,
 	type_width:       int,
-	type_name:        string,
+	type:             typeid,
 }
 KT1CX_Info :: struct {
 	backing_table: AllocatorInfo,
@@ -999,7 +1008,7 @@ kt1cx_init :: proc(info: KT1CX_Info, m: KT1CX_InfoMeta, result: ^KT1CX_Byte) {
 	assert(m.cell_pool_size >= 4 * Kilo)
 	assert(m.table_size     >= 4 * Kilo)
 	assert(m.type_width     >  0)
-	table_raw       := transmute(SliceBytes) mem_alloc(info.backing_table, m.table_size * m.cell_size)
+	table_raw       := transmute(SliceByte) mem_alloc(info.backing_table, m.table_size * m.cell_size)
 	slice_assert(transmute([]byte) table_raw)
 	result.cell_pool = mem_alloc(info.backing_cells, m.cell_pool_size * m.cell_size)
 	slice_assert(result.cell_pool)
@@ -1011,7 +1020,7 @@ kt1cx_clear :: proc(kt: KT1CX_Byte, m: KT1CX_ByteMeta) {
 	table_len   := len(kt.table) * m.cell_size
 	for ; cell_cursor != end(kt.table); cell_cursor = cell_cursor[m.cell_size:] // for cell, cell_id in kt.table.cells
 	{
-		slots       := SliceBytes { cell_cursor, m.cell_depth * m.slot_size } // slots = cell.slots
+		slots       := SliceByte { cell_cursor, m.cell_depth * m.slot_size } // slots = cell.slots
 		slot_cursor := slots.data
 		for;; {
 			slot := slice(slot_cursor, m.slot_size)          // slot = slots[slot_id]
@@ -1065,9 +1074,9 @@ kt1cx_get :: proc(kt: KT1CX_Byte, key: u64, m: KT1CX_ByteMeta) -> ^byte {
 kt1cx_set :: proc(kt: KT1CX_Byte, key: u64, value: []byte, backing_cells: AllocatorInfo, m: KT1CX_ByteMeta) -> ^byte {
 	hash_index  := kt1cx_slot_id(kt, key, m)
 	cell_offset := uintptr(hash_index) * uintptr(m.cell_size)
-	cell        := SliceBytes{& kt.table[cell_offset], m.cell_size}
+	cell_cursor := cursor(kt.table)[cell_offset:] // KT1CX_Cell(Type) cell = kt.table[hash_index]
 	{
-		slots       := SliceBytes {cell.data, m.cell_depth * m.slot_size}
+		slots       := SliceByte {cell_cursor, m.cell_depth * m.slot_size} // cell.slots
 		slot_cursor := slots.data
 		for ;;
 		{
@@ -1081,11 +1090,11 @@ kt1cx_set :: proc(kt: KT1CX_Byte, key: u64, value: []byte, backing_cells: Alloca
 				return cast(^byte) slot_cursor
 			}
 			if slot_cursor == end(transmute([]byte) slots) {
-				curr_cell := transmute(^KT1CX_Byte_Cell) (uintptr(cell.data) + m.cell_next_offset)
+				curr_cell := transmute(^KT1CX_Byte_Cell) (uintptr(cell_cursor) + m.cell_next_offset) // curr_cell = cell
 				if curr_cell != nil {
 					slots.data  = curr_cell.next
 					slot_cursor = curr_cell.next
-					cell.data   = curr_cell.next
+					cell_cursor = curr_cell.next
 					continue
 				}
 				else {
@@ -1271,10 +1280,18 @@ str8_fmt_kt1l :: proc(ainfo: AllocatorInfo, _buffer: ^[]byte, table: []KT1L_Slot
 }
 
 str8_fmt_backed :: proc(tbl_ainfo, buf_ainfo: AllocatorInfo, fmt_template: string, entries: [][2]string) -> string {
-	return {}
+	kt: []KT1L_Slot(string); kt1l_populate_slice_a2(string, & kt, tbl_ainfo, entries)
+	buf_size := Kilo * 64
+	buffer   := mem_alloc(buf_ainfo, buf_size)
+	result   := str8_fmt_kt1l(buf_ainfo, & buffer, kt, fmt_template)
+	return result
 }
 str8_fmt_tmp :: proc(fmt_template: string, entries: [][2]string) -> string {
-	return {}
+	@static tbl_mem: [Kilo * 32]byte; tbl_arena := farena_make(tbl_mem[:])
+	@static buf_mem: [Kilo * 64]byte; buffer := buf_mem[:]
+	kt: []KT1L_Slot(string); kt1l_populate_slice_a2(string, & kt, ainfo(& tbl_arena), entries)
+	result := str8_fmt_kt1l({}, & buffer, kt, fmt_template)
+	return result
 }
 
 Str8Cache_CELL_DEPTH :: 4
@@ -1288,39 +1305,129 @@ Str8Cache :: struct {
 	tbl_backing:  AllocatorInfo,
 	kt:           KT1CX_Str8,
 }
-str8cache_init :: proc(cache: ^Str8Cache, str_reserve, cell_reserve, tbl_backing: AllocatorInfo, cell_pool_size, table_size: int) {
+str8cache_init :: proc(cache: ^Str8Cache, str_reserve, cell_reserve, tbl_backing: AllocatorInfo, cell_pool_size := Kilo, table_size := Kilo) {
+	assert(cache != nil)
+	assert(str_reserve.procedure  != nil)
+	assert(cell_reserve.procedure != nil)
+	assert(tbl_backing.procedure  != nil)
+	cache.str_reserve  = str_reserve
+	cache.cell_reserve = cell_reserve
+	cache.tbl_backing  = tbl_backing
+	info := KT1CX_Info {
+		backing_cells = cell_reserve,
+		backing_table = tbl_backing,
+	}
+	m := KT1CX_InfoMeta {
+		cell_pool_size   = cell_pool_size,
+		table_size       = table_size,
+		slot_size        = size_of(KT1CX_Slot_Str8),
+		slot_key_offset  = offset_of(KT1CX_Slot_Str8, key),
+		cell_next_offset = offset_of(KT1CX_Cell_Str8, next),
+		cell_depth       = Str8Cache_CELL_DEPTH,
+		type_width       = size_of(string),
+		type             = string
+	}
+	kt1cx_init(info, m, transmute(^KT1CX_Byte) & cache.kt)
+	return
 }
 str8cache_make :: proc(str_reserve, cell_reserve, tbl_backing: AllocatorInfo, cell_pool_size, table_size: int) -> Str8Cache { 
 	cache : Str8Cache; str8cache_init(& cache, str_reserve, cell_reserve, tbl_backing, cell_pool_size, table_size); return cache 
 }
 str8cache_clear :: proc(kt: KT1CX_Str8) {
+	kt1cx_assert(kt)
+	kt1cx_clear(kt1cx_byte(kt), {
+		slot_size        = size_of(KT1CX_Slot_Str8),
+		slot_key_offset  = offset_of(KT1CX_Slot_Str8, key),
+		cell_next_offset = offset_of(KT1CX_Cell_Str8, next),
+		cell_depth       = Str8Cache_CELL_DEPTH,
+		cell_size        = size_of(KT1CX_Cell_Str8),
+		type_width       = size_of(string),
+		type             = string,
+	})
 }
 str8cache_get :: proc(kt: KT1CX_Str8, key: u64) -> ^string {
-	return nil
+	kt1cx_assert(kt)
+	result := kt1cx_get(kt1cx_byte(kt), key, {
+		slot_size        = size_of(KT1CX_Slot_Str8),
+		slot_key_offset  = offset_of(KT1CX_Slot_Str8, key),
+		cell_next_offset = offset_of(KT1CX_Cell_Str8, next),
+		cell_depth       = Str8Cache_CELL_DEPTH,
+		cell_size        = size_of(KT1CX_Cell_Str8),
+		type_width       = size_of(string),
+		type             = string,
+	})
+	return transmute(^string) result
 }
 str8cache_set :: proc(kt: KT1CX_Str8, key: u64, value: string, str_reserve, cell_reserve: AllocatorInfo) -> ^string {
-	return nil
+	kt1cx_assert(kt)
+	slice_assert(transmute([]byte) value)
+	assert(str_reserve.procedure  != nil)
+	assert(cell_reserve.procedure != nil)
+	entry := kt1cx_set(kt1cx_byte(kt), key, transmute([]byte) value, cell_reserve, {
+		slot_size        = size_of(KT1CX_Slot_Str8),
+		slot_key_offset  = offset_of(KT1CX_Slot_Str8, key),
+		cell_next_offset = offset_of(KT1CX_Cell_Str8, next),
+		cell_depth       = Str8Cache_CELL_DEPTH,
+		cell_size        = size_of(KT1CX_Cell_Str8),
+		type_width       = size_of(string),
+		type             = string,
+	})
+	assert(entry != nil)
+	result := transmute(^string) entry
+	is_empty := len(result) == 0
+	if is_empty {
+		result ^ = transmute(string) alloc_slice(str_reserve, []u8, len(value))
+		copy(result ^, value)
+	}
+	return result
 }
-cache_str8 :: proc(cache: ^Str8Cache, str: string) -> ^string {
-	 return nil
+cache_str8 :: proc(cache: ^Str8Cache, str: string) -> string {
+	assert(cache != nil)
+	key: u64 = 0; hash64_djb8(& key, transmute([]byte) str)
+	result  := str8cache_set(cache.kt, key, str, cache.str_reserve, cache.cell_reserve)
+	return result ^
 }
 
 Str8Gen :: struct {
 	backing:  AllocatorInfo,
-	ptr:     ^u8,
-	len:      int,
-	cap:      int,
+	ptr:     [^]u8,
+	len:        int,
+	cap:        int,
 }
 str8gen_init :: proc(gen: ^Str8Gen, ainfo: AllocatorInfo) {
-
+	assert(gen != nil)
+	gen.backing = ainfo
+	gen.ptr     = raw_data(mem_alloc(ainfo, Kilo * 4))
+	assert(gen.ptr != nil)
+	gen.len = 0
+	gen.cap = Kilo * 4
 }
 str8gen_make :: proc(ainfo: AllocatorInfo) -> Str8Gen { gen: Str8Gen; str8gen_init(& gen, ainfo); return gen }
-str8gen_to_bytes  :: proc(gen: Str8Gen) -> []byte { return transmute([]byte) SliceBytes {data = gen.ptr, len = gen.len} }
-str8_from_str8gen :: proc(gen: Str8Gen) -> string { return transmute(string) SliceBytes {data = gen.ptr, len = gen.len} }
+str8gen_to_bytes  :: proc(gen: Str8Gen) -> []byte { return transmute([]byte) SliceByte {data = gen.ptr, len = gen.len} }
+str8_from_str8gen :: proc(gen: Str8Gen) -> string { return transmute(string) SliceByte {data = gen.ptr, len = gen.len} }
 
 str8gen_append_str8 :: proc(gen: ^Str8Gen, str: string) {
+	result := mem_grow(gen.backing, str8gen_to_bytes(gen ^), len(str) + gen.len)
+	slice_assert(result)
+	to_copy := slice(cursor(result)[gen.len:], len(result) - gen.len)
+	copy(to_copy, transmute([]byte) str)
+	gen.ptr = transmute(^u8) raw_data(result)
+	gen.len = len(result)
+	gen.cap = max(gen.len, gen.cap) // TODO(Ed): Arenas currently hide total capacity before growth. Problably better todo classic append to actually track this.
 }
 str8gen_append_fmt :: proc(gen: ^Str8Gen, fmt_template: string, tokens: [][2]string) {
+	@static tbl_mem: [Kilo * 32]byte; tbl_arena := farena_make(tbl_mem[:])
+	kt: []KT1L_Slot(string); kt1l_populate_slice_a2(string, & kt, ainfo(& tbl_arena), tokens)
+	buffer := slice(gen.ptr[gen.len:], gen.cap - gen.len)
+	if len(buffer) < Kilo * 16 {
+		result := mem_grow(gen.backing, str8gen_to_bytes(gen ^), Kilo * 16 + gen.cap)
+		slice_assert(result)
+		gen.ptr  = raw_data(result)
+		gen.cap += Kilo * 16
+		buffer   = slice(gen.ptr[gen.len:], gen.cap - gen.len)
+	}
+	result := str8_fmt_kt1l(gen.backing, & buffer, kt, fmt_template)
+	gen.len += len(result)
 }
 //#endregion String Operations
 

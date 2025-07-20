@@ -1680,7 +1680,7 @@ Str8 str8__fmt(Str8 fmt_template, Slice_A2_Str8* entries) {
 inline
 void str8cache__init(Str8Cache* cache, Opts_str8cache_init* opts) {
 	assert(cache != nullptr);
-	assert(opts != nullptr);
+	assert(opts  != nullptr);
 	assert(opts->str_reserve.proc  != nullptr);
 	assert(opts->cell_reserve.proc != nullptr);
 	assert(opts->tbl_backing.proc  != nullptr);
@@ -1783,7 +1783,9 @@ void str8gen_append_str8(Str8Gen* gen, Str8 str){
 	slice_assert(result);
 	Slice_Byte to_copy = { result.ptr + gen->len, result.len - gen->len };
 	slice_copy(to_copy, slice_byte(str));
-	gen->ptr = cast(UTF8*, result.ptr); gen->len = result.len;
+	gen->ptr  = cast(UTF8*, result.ptr); 
+	gen->len += str.len;
+	gen->cap  = max(gen->len , gen->cap); // TODO(Ed): Arenas currently hide total capacity before growth. Problably better todo classic append to actually track this.
 }
 void str8gen__append_fmt(Str8Gen* gen, Str8 fmt_template, Slice_A2_Str8* entries){
 	local_persist Byte tbl_mem[kilo(32)]; FArena tbl_arena = farena_make(slice_fmem(tbl_mem));
@@ -1792,8 +1794,8 @@ void str8gen__append_fmt(Str8Gen* gen, Str8 fmt_template, Slice_A2_Str8* entries
 	if (buffer.len < kilo(16)) {
 		Slice_Byte result = mem_grow(gen->backing, str8gen_slice_byte(* gen), kilo(16) + gen->cap );
 		slice_assert(result);
-		gen->ptr = result.ptr;
-		gen->cap = result.len;
+		gen->ptr  = result.ptr;
+		gen->cap += kilo(16);
 		buffer = (Slice_Byte){ cast(Byte*, gen->ptr + gen->len), gen->cap - gen->len };
 	}
 	Str8 result = str8__fmt_kt1l(gen->backing, & buffer, kt, fmt_template);
