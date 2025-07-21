@@ -134,7 +134,7 @@ slice_end :: #force_inline proc "contextless" (s : $SliceType / []$Type) -> ^Typ
 @(require_results) slice_to_bytes :: proc "contextless" (s: []$Type) -> []byte         { return ([^]byte)(raw_data(s))[:len(s) * size_of(Type)] }
 @(require_results) slice_raw      :: proc "contextless" (s: []$Type) -> SliceRaw(Type) { return transmute(SliceRaw(Type)) s }
 
-slice_zero :: proc "contextless" (data: $SliceType / []$Type) { zero(raw_data(data), size_of(Type) * len(data)) }
+slice_zero :: proc "contextless" (data: $SliceType / []$Type) { memory_zero(raw_data(data), size_of(Type) * len(data)) }
 slice_copy :: proc "contextless" (dst, src: $SliceType / []$Type) -> int {
 	n := max(0, min(len(dst), len(src)))
 	if n > 0 {
@@ -166,9 +166,7 @@ sll_queue_push_nz :: proc "contextless" (nil_val: ^$Type, first, last, n: ^^Type
 		n.next        = nil_val
 	}
 }
-sll_queue_push_n :: proc "contextless" (first: ^$Type, last, n: ^^Type) {
-    sll_queue_push_nz(nil, first, last, n)
-}
+sll_queue_push_n :: #force_inline proc "contextless" (first: ^$Type, last, n: ^^Type) { sll_queue_push_nz(nil, first, last, n) }
 //endregion Memory
 
 //region Allocator Interface
@@ -493,6 +491,7 @@ MS_BOOL                  :: i32
 MS_DWORD                 :: u32
 MS_HANDLE                :: rawptr
 MS_LPVOID                :: rawptr
+MS_LPCSTR                :: cstring
 MS_LPWSTR                :: [^]u16
 MS_LPDWORD               :: ^MS_DWORD
 MS_LPSECURITY_ATTRIBUTES :: ^MS_SECURITY_ATTRIBUTES
@@ -1453,7 +1452,7 @@ MS_FILE_ATTRIBUTE_NORMAL :: 0x00000080
 MS_INVALID_FILE_SIZE     :: MS_DWORD(0xFFFFFFFF)
 foreign kernel32 {
 	CreateFileA :: proc(
-		lpFileName:            MS_LPWSTR,
+		lpFileName:            MS_LPCSTR,
 		dwDesiredAccess:       MS_DWORD,
 		dwSharedMode:          MS_DWORD,
 		lpSecurityAttributes:  MS_LPSECURITY_ATTRIBUTES,
@@ -1483,9 +1482,93 @@ FileOpInfo :: struct {
 	content: []byte,
 }
 api_file_read_contents :: proc(result: ^FileOpInfo, path: string, backing: AllocatorInfo, zero_backing: b32 = false) {
+	assert(result != nil)
+	string_assert(path)
+	assert(backing.procedure != nil)
+	@static scratch: [Kilo * 64]u8
+	path_cstr := str8_to_cstr_capped(path, scratch[:])
+	id_file := CreateFileA(
+		path_cstr,
+		MS_GENERIC_READ,
+		MS_FILE_SHARE_READ,
+		nil,
+		MS_OPEN_EXISTING,
+		MS_FILE_ATTRIBUTE_NORMAL,
+		nil
+	)
+	open_failed := uintptr(id_file) == MS_INVALID_HANDLE_VALUE
+	if open_failed {
+		error_code := GetLastError()
+		assert(error_code != 0)
+		return
+	}
+	file_size : MS_LARGE_INTEGER = { QuadPart = 0}
+	get_size_failed := cast(MS_DWORD) ~ GetFileSizeEx(id_file, & file_size)
+	if get_size_failed == MS_INVALID_FILE_SIZE {
+		assert(get_size_failed == MS_INVALID_FILE_SIZE)
+		return
+	}
+	buffer := mem_alloc(backing, cast(int) file_size.QuadPart)
+	not_enough_backing := len(buffer) < cast(int) file_size.QuadPart
+	if not_enough_backing {
+		assert(not_enough_backing)
+		result^ = {}
+		return
+	}
+	if zero_backing {
+		zero(buffer)
+	}
+	amount_read : MS_DWORD = 0
+	read_result := ReadFile(
+		id_file,
+		raw_data(buffer),
+		cast(MS_DWORD) file_size.QuadPart,
+		& amount_read,
+		nil
+	)
+	CloseHandle(id_file)
+	read_failed := ! bool(read_result)
+	read_failed |= amount_read != cast(u32) file_size.QuadPart
+	if read_failed {
+		assert(read_failed)
+		return
+	}
+	result.content = slice(cursor(buffer), cast(int) file_size.QuadPart)
+	return
 }
 file_read_contents_stack :: proc(path: string, backing: AllocatorInfo, zero_backing: b32 = false) -> FileOpInfo {
-	return {}
+	result : FileOpInfo; api_file_read_contents(& result, path, backing, zero_backing)
+	return result
+}
+file_write_str8 :: proc(path, content: string) {
+	string_assert(path)
+	@static scratch: [Kilo * 64]u8;
+	path_cstr := str8_to_cstr_capped(path, scratch[:])
+	id_file := CreateFileA(
+		path_cstr,
+		MS_GENERIC_WRITE,
+		MS_FILE_SHARE_READ,
+		nil,
+		MS_CREATE_ALWAYS,
+		MS_FILE_ATTRIBUTE_NORMAL,
+		nil
+	)
+	open_failed := uintptr(id_file) == MS_INVALID_HANDLE_VALUE
+	if open_failed {
+		error_code := GetLastError()
+		assert(error_code != 0)
+		return
+	}
+	bytes_written : MS_DWORD = 0
+	status := WriteFile(
+		id_file,
+		raw_data(content),
+		cast(MS_DWORD) len(content),
+		& bytes_written,
+		nil
+	)
+	assert(status != 0)
+	assert(bytes_written == cast(u32) len(content))
 }
 //endregion File System
 

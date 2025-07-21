@@ -1838,7 +1838,6 @@ __declspec(dllimport) MS_DWORD __stdcall GetLastError(void);
 
 inline
 FileOpInfo file__read_contents(Str8 path, Opts_read_file_contents* opts) {
-	slice_assert(path);
 	assert(opts != nullptr);
 	FileOpInfo result = {0}; api_file_read_contents(& result, path, * opts);
 	return result;
@@ -1905,7 +1904,7 @@ void api_file_read_contents(FileOpInfo* result, Str8 path, Opts_read_file_conten
 void file_write_str8(Str8 path, Str8 content)
 {
 	slice_assert(path);
-	Byte scratch[kilo(64)] = {0};
+	local_persist U8 scratch[kilo(64)] = {0};
 	char const* path_cstr = str8_to_cstr_capped(path, slice_fmem(scratch));
 	MS_HANDLE id_file = CreateFileA(
 		path_cstr,
