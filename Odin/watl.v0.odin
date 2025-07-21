@@ -2,7 +2,7 @@
 WATL Exercise
 Version:   0 (From Scratch, 1-Stage Compilation, WinAPI Only, Win CRT Multi-threaded Static Linkage)
 Host:      Windows 11 (x86-64)
-Toolchain: odin-lang/Odin dev-2025-06
+Toolchain: odin-lang/Odin dev-2025-07
 */
 package odin
 
@@ -489,14 +489,23 @@ MS_TOKEN_ADJUST_PRIVILEGES :: 0x0020
 MS_SE_PRIVILEGE_ENABLED    :: 0x00000002
 MS_TOKEN_QUERY             :: 0x0008
 // Windows API types
-MS_BOOL                :: i32
-MS_DWORD               :: u32
-MS_HANDLE              :: rawptr
-MS_LPVOID              :: rawptr
-MS_LPWSTR              :: [^]u16
-MS_LUID                :: struct { low_part: MS_DWORD, high_part: i32 }
-MS_LUID_AND_ATTRIBUTES :: struct { luid: MS_LUID, attributes: MS_DWORD }
-MS_TOKEN_PRIVILEGES    :: struct { privilege_count: MS_DWORD, privileges: [1]MS_LUID_AND_ATTRIBUTES }
+MS_BOOL                  :: i32
+MS_DWORD                 :: u32
+MS_HANDLE                :: rawptr
+MS_LPVOID                :: rawptr
+MS_LPWSTR                :: [^]u16
+MS_LPDWORD               :: ^MS_DWORD
+MS_LPSECURITY_ATTRIBUTES :: ^MS_SECURITY_ATTRIBUTES
+MS_LPOVERLAPPED          :: ^MS_OVERLAPPED
+MS_LONG                  :: i32
+MS_LONGLONG              :: i64
+MS_ULONG_PTR             :: u64
+MS_LARGE_INTEGER         :: struct #raw_union { _: struct {LowPart: MS_DWORD, HighPart: MS_LONG}, u: struct {LowPart: MS_DWORD, HighPart: MS_LONG}, QuadPart: MS_LONGLONG }
+MS_LUID                  :: struct { low_part: MS_DWORD, high_part: i32 }
+MS_LUID_AND_ATTRIBUTES   :: struct { luid: MS_LUID, attributes: MS_DWORD }
+MS_TOKEN_PRIVILEGES      :: struct { privilege_count: MS_DWORD, privileges: [1]MS_LUID_AND_ATTRIBUTES }
+MS_SECURITY_ATTRIBUTES   :: struct { nLength: MS_DWORD,lpSecurityDescriptor: MS_LPVOID, bInheritHandle: MS_BOOL }
+MS_OVERLAPPED            :: struct { Internal: MS_ULONG_PTR, InternalHigh: MS_ULONG_PTR, _: struct #raw_union { LowPart: MS_DWORD, HighPart: MS_LONG }, QuadPart: MS_LONGLONG }
 // Windows API imports
 foreign import kernel32 "system:Kernel32.lib"
 foreign import advapi32 "system:Advapi32.lib"
@@ -1432,6 +1441,44 @@ str8gen_append_fmt :: proc(gen: ^Str8Gen, fmt_template: string, tokens: [][2]str
 //#endregion String Operations
 
 //region File System
+
+// #include <fileapi.h>
+MS_CREATE_ALWAYS         :: 2
+MS_OPEN_EXISTING         :: 3
+MS_GENERIC_READ          :: (0x80000000)
+MS_GENERIC_WRITE         :: (0x40000000)
+MS_FILE_SHARE_READ       :: 0x00000001
+MS_FILE_SHARE_WRITE      :: 0x00000002
+MS_FILE_ATTRIBUTE_NORMAL :: 0x00000080
+MS_INVALID_FILE_SIZE     :: MS_DWORD(0xFFFFFFFF)
+foreign kernel32 {
+	CreateFileA :: proc(
+		lpFileName:            MS_LPWSTR,
+		dwDesiredAccess:       MS_DWORD,
+		dwSharedMode:          MS_DWORD,
+		lpSecurityAttributes:  MS_LPSECURITY_ATTRIBUTES,
+		dwCreationDisposition: MS_DWORD,
+		dwFlagsAndAttributes:  MS_DWORD,
+		hTemplateFile:         MS_HANDLE,
+	) -> MS_HANDLE ---
+	ReadFile :: proc(
+		hFile:                MS_HANDLE,
+		lpBuffer:             MS_LPVOID,
+		nNumberOfBytesToRead: MS_DWORD,
+		lpNumberOfBytesRead:  MS_LPDWORD,
+		lpOverlapped:         MS_LPOVERLAPPED,
+	) -> MS_BOOL ---
+	WriteFile :: proc(
+		hFile:                  MS_HANDLE,
+		lpBuffer:               MS_LPVOID,
+		nNumberOfBytesToWrite:  MS_DWORD,
+		lpNumberOfBytesWritten: MS_LPDWORD,
+		lpOverlapped:           MS_LPOVERLAPPED,
+	) -> MS_BOOL ---
+	GetFileSizeEx :: proc(hFile: MS_HANDLE, lpFileSize: ^MS_LARGE_INTEGER) -> MS_BOOL ---
+	GetLastError :: proc() -> MS_DWORD ---
+}
+
 FileOpInfo :: struct {
 	content: []byte,
 }
@@ -1522,5 +1569,8 @@ watl_parse_stack :: proc(tokens: []WATL_Tok,
 ) -> (info: WATL_ParseInfo) 
 {
 	return
+}
+watl_dump_listing :: proc(buffer: AllocatorInfo, lines: []WATL_Line) -> string {
+	return {}
 }
 //endregion WATL
