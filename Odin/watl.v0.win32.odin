@@ -1682,6 +1682,9 @@ api_watl_lex :: proc(info: ^WATL_LexInfo, source: string,
 		prev = src_cursor[-1:]
 		code = src_cursor[0]
 	}
+	assert(tok != nil)
+	assert(num > 0)
+	info.toks = transmute([]string) slice(cursor(tok)[- num + 1:], num)
 	return
 	slice_constraint_fail :: proc(info: ^WATL_LexInfo, ainfo_msgs: AllocatorInfo, tok: ^Raw_String, msg_last: ^^WATL_LexMsg) {
 		info.signal |= { .MemFail_SliceConstraintFail }

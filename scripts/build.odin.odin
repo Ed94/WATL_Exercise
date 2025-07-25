@@ -97,7 +97,7 @@ main :: proc() {
 	path_root     := get_working_dir()
 	path_build    := join_path(path_root,     "build")
 	path_odin_src := join_path(path_root,     "Odin")
-	file_source   := join_path(path_odin_src, "watl.v0.odin")
+	file_source   := join_path(path_odin_src, "watl.v0.win32.odin")
 	file_exe      := join_path(path_build,    "watl.v0.exe")
 
 	res, errs := build(path_build, {
