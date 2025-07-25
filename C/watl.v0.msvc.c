@@ -2108,14 +2108,15 @@ void api_watl_parse(WATL_ParseInfo* info, Slice_WATL_Tok tokens, Opts_watl_parse
 					info->signal |= WATL_ParseStatus_MemFail_SliceConstraintFail;
 					WATL_ParseMsg* msg = alloc_type(opts->ainfo_msgs, WATL_ParseMsg);
 					msg->content = lit("Line slice allocation was not contiguous");
-					msg->pos     = (WATL_Pos){-1, -1};
+					msg->pos     = (WATL_Pos){cast(S32, info->lines.len), cast(S32, line->len)};
+					msg->line    = line;
+					msg->tok     = token;
 					sll_queue_push_n(info->msgs, msg_last, msg, next);
 					assert(opts->failon_slice_constraint_fail == false);
 					return;
 				}
 				line             = new_line;
 				line->ptr        = curr;
-				line->len        = 0;
 				info->lines.len += 1;
 			}
 			continue;
@@ -2136,7 +2137,6 @@ void api_watl_parse(WATL_ParseInfo* info, Slice_WATL_Tok tokens, Opts_watl_parse
 			return;
 		}
 		curr       = new_node;
-		* curr     = (WATL_Node){0};
 		line->len += 1;
 		continue;
 	}

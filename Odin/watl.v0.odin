@@ -1635,7 +1635,10 @@ api_watl_lex :: proc(info: ^WATL_LexInfo, source: string,
 			case .Space: fallthrough
 			case .Tab: 
 				if prev[0] != src_cursor[0] {
-					new_tok       := alloc_tok(ainfo_toks); if cursor(new_tok)[-1:] != tok { slice_constraint_fail(info, ainfo_msgs, new_tok, & msg_last); return }
+					new_tok       := alloc_tok(ainfo_toks); if cursor(new_tok)[-1:] != tok { 
+						slice_constraint_fail(info, ainfo_msgs, new_tok, & msg_last); 
+						return 
+					}
 					tok            = new_tok
 					tok^           = transmute(Raw_String) slice(src_cursor, 0)
 					was_formatting = true
@@ -1644,14 +1647,20 @@ api_watl_lex :: proc(info: ^WATL_LexInfo, source: string,
 				src_cursor = src_cursor[1:]
 				tok.len   += 1
 			case .Line_Feed:
-				new_tok       := alloc_tok(ainfo_toks); if cursor(new_tok)[-1:] != tok { slice_constraint_fail(info, ainfo_msgs, new_tok, & msg_last); return }
+				new_tok       := alloc_tok(ainfo_toks); if cursor(new_tok)[-1:] != tok { 
+					slice_constraint_fail(info, ainfo_msgs, new_tok, & msg_last);
+					return 
+				}
 				tok            = new_tok
 				tok^           = transmute(Raw_String) slice(src_cursor, 1)
 				src_cursor     = src_cursor[1:]
 				was_formatting = true
 				num           += 1
 			case .Carriage_Return:
-				new_tok       := alloc_tok(ainfo_toks); if cursor(new_tok)[-1:] != tok { slice_constraint_fail(info, ainfo_msgs, new_tok, & msg_last); return }
+				new_tok       := alloc_tok(ainfo_toks); if cursor(new_tok)[-1:] != tok {
+					slice_constraint_fail(info, ainfo_msgs, new_tok, & msg_last); 
+					return
+				}
 				tok            = new_tok
 				tok^           = transmute(Raw_String) slice(src_cursor, 2)
 				src_cursor     = src_cursor[1:]
@@ -1659,7 +1668,10 @@ api_watl_lex :: proc(info: ^WATL_LexInfo, source: string,
 				num           += 1
 			case:
 				if (was_formatting) {
-					new_tok       := alloc_tok(ainfo_toks); if cursor(new_tok)[-1:] != tok { slice_constraint_fail(info, ainfo_msgs, new_tok, & msg_last); return }
+					new_tok       := alloc_tok(ainfo_toks); if cursor(new_tok)[-1:] != tok {
+						slice_constraint_fail(info, ainfo_msgs, new_tok, & msg_last);
+						return
+					}
 					tok            = new_tok
 					tok^           = transmute(Raw_String) slice(src_cursor, 0)
 					was_formatting = false;
@@ -1707,7 +1719,7 @@ WATL_ParseMsg :: struct {
 	content:  string,
 	line:    ^WATL_Line,
 	tok:     ^WATL_Tok,
-	pos:     ^WATL_Pos,
+	pos:      WATL_Pos,
 }
 WATL_ParseStatus_Flag :: enum u32 {
 	MemFail_SliceConstraintFail,
@@ -1724,7 +1736,59 @@ api_watl_parse :: proc(info: ^WATL_ParseInfo, tokens: []WATL_Tok,
 	ainfo_lines: AllocatorInfo,
 	str_cache:   ^Str8Cache,
 	failon_slice_constraint_fail: b32,
-) {
+)
+{
+	if len(tokens) == 0 do return
+	assert(ainfo_lines.procedure != nil)
+	assert(ainfo_msgs.procedure  != nil)
+	assert(ainfo_nodes.procedure != nil)
+	assert(str_cache             != nil)
+	msg_last: ^WATL_ParseMsg
+
+	info_lines := transmute(^SliceRaw(WATL_Node)) & info.lines
+	line := alloc_type(ainfo_lines, SliceRaw(WATL_Node))
+	curr := alloc_type(ainfo_nodes, WATL_Node)
+	line ^       = { transmute([^]WATL_Node) curr, 0 }
+	info_lines ^ = { transmute([^]WATL_Node) line, 0 }
+	for & token in tokens
+	{
+		#partial switch cast(WATL_TokKind) token[0]
+		{
+			case .Carriage_Return: fallthrough
+			case .Line_Feed:
+				new_line := alloc_type(ainfo_lines, WATL_Line); if cursor(new_line ^)[-1:] != line.data {
+					info.signal |= { .MemFail_SliceConstraintFail }
+					msg := alloc_type(ainfo_msgs, WATL_ParseMsg)
+					msg.content = "Line slice allocation was not contiguous"
+					msg.pos     = { cast(i32) len(info.lines), cast(i32) line.len }
+					msg.line    = transmute(^[]WATL_Node) line
+					msg.tok     = & token
+					sll_queue_push_n(& info.msgs, & msg_last, & msg)
+					assert(failon_slice_constraint_fail == false)
+					return
+				}
+				line            = transmute(^SliceRaw(WATL_Node)) new_line
+				line.data       = curr
+				info_lines.len += 1
+				continue
+
+			case:
+			break;
+		}
+		curr ^ = cache_str8(str_cache, token)
+		new_node := alloc_type(ainfo_nodes, WATL_Node); if cursor(new_node)[-1:] != curr {
+			info.signal |= { .MemFail_SliceConstraintFail }
+			msg := alloc_type(ainfo_msgs, WATL_ParseMsg)
+			msg.content = "Nodes slice allocation was not contiguous"
+			msg.pos     = { cast(i32) len(info.lines), cast(i32) line.len }
+			msg.line    = transmute(^[]WATL_Node) line
+			msg.tok     = & token
+			sll_queue_push_n(& info.msgs, & msg_last, & msg)
+			return
+		}
+		line.len += 1
+		continue
+	}
 }
 watl_parse_stack :: #force_inline proc(tokens: []WATL_Tok, 
 	ainfo_msgs:  AllocatorInfo,
@@ -1744,6 +1808,32 @@ watl_parse_stack :: #force_inline proc(tokens: []WATL_Tok,
 	return
 }
 watl_dump_listing :: proc(buffer: AllocatorInfo, lines: []WATL_Line) -> string {
+	@static scratch : [Kilo * 64]byte; sarena := farena_make(scratch[:]); sinfo := ainfo(& sarena)
+
+	result := str8gen_make(buffer)
+	line_num : u32 = 0
+	for line in lines
+	{
+		str8gen_append_fmt(& result, "Line <line_num> - Chunks <chunk_num>:\n", {
+			{ "line_num",  str8_from_u32(sinfo,            line_num, 10, 0, 0) },
+			{ "chunk_num", str8_from_u32(sinfo, cast(u32) len(line), 10, 0, 0) }
+		})
+		for chunk in line 
+		{
+			id : string
+			#partial switch cast(WATL_TokKind) chunk[0]
+			{
+				case .Space: id = "Space"
+				case .Tab:   id = "Tab"
+				case:        id = "Visible"
+			}
+			str8gen_append_fmt(& result, "\t<id>(<size>): '<chunk>'\n", {
+				{ "id",    id },
+				{ "size",  str8_from_u32(sinfo, cast(u32) len(chunk), 10, 0, 0) },
+				{ "chunk", chunk }
+			})
+		}
+	}
 	return {}
 }
 //endregion WATL
