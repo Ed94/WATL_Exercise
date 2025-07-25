@@ -6,11 +6,6 @@ Toolchain: odin-lang/Odin dev-2025-07
 */
 package odin
 
-main :: proc()
-{
-	
-}
-
 import "base:builtin"
 import "base:intrinsics"
 import "base:runtime"
@@ -78,6 +73,10 @@ zero_explicit :: proc {
 	memory_zero_explicit,
 }
 
+file_read_contents :: proc {
+	api_file_read_contents,
+	file_read_contents_stack,
+}
 watl_lex :: proc {
 	api_watl_lex,
 	watl_lex_stack,
@@ -589,7 +588,7 @@ VArena :: struct {
 	flags:         VArenaFlags,
 }
 
-varena_make :: proc(reserve_size, commit_size: int, base_addr: int = 0, flags: VArenaFlags = {}) -> ^VArena {
+varena_make :: proc(reserve_size := Mega * 64, commit_size := Mega * 64, base_addr: int = 0, flags: VArenaFlags = {}) -> ^VArena {
 	reserve_size := reserve_size
 	commit_size  := commit_size
 	if reserve_size == 0 { reserve_size = 64 * Mega } // 64MB
@@ -747,7 +746,7 @@ Arena :: struct {
 	flags:    ArenaFlags,
 }
 
-arena_make :: proc(reserve_size, commit_size: int, base_addr: int = 0, flags: ArenaFlags = {}) -> ^Arena {
+arena_make :: proc(reserve_size := Mega * 64, commit_size := Mega * 64, base_addr: int = 0, flags: ArenaFlags = {}) -> ^Arena {
 	header_size := align_pow2(size_of(Arena), MEMORY_ALIGNMENT_DEFAULT)
 	current     := varena_make(reserve_size, commit_size, base_addr, transmute(VArenaFlags) flags)
 	assert(current != nil)
@@ -1735,7 +1734,7 @@ api_watl_parse :: proc(info: ^WATL_ParseInfo, tokens: []WATL_Tok,
 	ainfo_nodes: AllocatorInfo,
 	ainfo_lines: AllocatorInfo,
 	str_cache:   ^Str8Cache,
-	failon_slice_constraint_fail: b32,
+	failon_slice_constraint_fail: b32 = false,
 )
 {
 	if len(tokens) == 0 do return
@@ -1795,7 +1794,7 @@ watl_parse_stack :: #force_inline proc(tokens: []WATL_Tok,
 	ainfo_nodes: AllocatorInfo,
 	ainfo_lines: AllocatorInfo,
 	str_cache:   ^Str8Cache,
-	failon_slice_constraint_fail: b32,
+	failon_slice_constraint_fail: b32 = false,
 ) -> (info: WATL_ParseInfo) 
 {
 	api_watl_parse(& info, 
@@ -1834,6 +1833,60 @@ watl_dump_listing :: proc(buffer: AllocatorInfo, lines: []WATL_Line) -> string {
 			})
 		}
 	}
-	return {}
+	return str8_from_str8gen(result)
 }
 //endregion WATL
+
+main :: proc()
+{
+	os_init()
+
+	// Note(Ed): Possible compiler bug, cannot resolve proc map with named arguments.
+	
+	vm_file := varena_make(reserve_size = Giga * 4, flags = { .No_Large_Pages })
+	// file    := file_read_contents("watl.v0.msvc.c", backing = ainfo(vm_file))
+	file    := file_read_contents("watl.v0.msvc.c", ainfo(vm_file))
+	slice_assert(file.content)
+
+	a_msgs  := arena_make()
+	a_toks  := arena_make()
+	// lex_res := watl_lex(transmute(string) file.content, 
+	// 	ainfo_msgs = ainfo(a_msgs), 
+	// 	ainfo_toks = ainfo(a_toks),
+	// )
+	lex_res := watl_lex(transmute(string) file.content, 
+		ainfo(a_msgs), 
+		ainfo(a_toks),
+	)
+	assert(lex_res.signal & { .MemFail_SliceConstraintFail } == {})
+
+	str8_cache_kt1_ainfo := arena_make()
+	str_cache := str8cache_make(
+		str_reserve    = ainfo(arena_make()),
+		cell_reserve   = ainfo(str8_cache_kt1_ainfo),
+		tbl_backing    = ainfo(str8_cache_kt1_ainfo),
+		cell_pool_size = Kilo * 4,
+		table_size     = Kilo * 32,
+	)
+
+	a_lines := arena_make()
+	// parse_res := watl_parse(lex_res.toks,
+	// 	ainfo_msgs  = ainfo(a_msgs),
+	// 	ainfo_nodes = ainfo(a_toks),
+	// 	ainfo_lines = ainfo(a_lines),
+	// 	str_cache   = & str_cache
+	// )
+	parse_res := watl_parse(lex_res.toks,
+		ainfo(a_msgs),
+		ainfo(a_toks),
+		ainfo(a_lines),
+		& str_cache
+	)
+	assert(parse_res.signal & { .MemFail_SliceConstraintFail } == {})
+
+	arena_reset(a_msgs)
+	arena_reset(a_toks)
+	listing := watl_dump_listing(ainfo(a_msgs), parse_res.lines)
+	file_write_str8("watl.v0.odin.listing.txt", listing)
+	return
+}
