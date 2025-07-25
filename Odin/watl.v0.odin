@@ -41,6 +41,7 @@ copy_non_overlapping :: proc {
 	slice_copy_non_overlapping,
 }
 cursor :: proc {
+	ptr_cursor,
 	slice_cursor,
 	string_cursor,
 }
@@ -92,6 +93,8 @@ Kilo :: 1024
 Mega :: Kilo * 1024
 Giga :: Mega * 1024
 Tera :: Giga * 1024
+
+ptr_cursor :: #force_inline proc "contextless" (ptr: ^$Type) -> [^]Type { return transmute([^]Type) ptr }
 
 align_pow2 :: proc(x: int, b: int) -> int {
     assert(b != 0)
@@ -1613,7 +1616,6 @@ api_watl_lex :: proc(info: ^WATL_LexInfo, source: string,
 	assert(info != nil)
 	assert(ainfo_msgs.procedure != nil)
 	assert(ainfo_toks.procedure != nil)
-	start_snapshot := allocator_query(ainfo_toks)
 	msg_last : ^WATL_LexMsg
 
 	src_cursor := cursor(source)
@@ -1625,13 +1627,16 @@ api_watl_lex :: proc(info: ^WATL_LexInfo, source: string,
 	was_formatting := true
 	for ; src_cursor < end;
 	{
-		alloc_tok :: #force_inline proc(ainfo: AllocatorInfo) -> ^Raw_String { return alloc_type(ainfo, Raw_String, align_of(Raw_String), true) }
+		alloc_tok :: #force_inline proc(ainfo: AllocatorInfo) -> ^Raw_String { 
+			return alloc_type(ainfo, Raw_String, align_of(Raw_String), true) 
+		}
 		#partial switch cast(WATL_TokKind) code
 		{
 			case .Space: fallthrough
 			case .Tab: 
 				if prev[0] != src_cursor[0] {
-					tok            = alloc_tok(ainfo_toks)
+					new_tok       := alloc_tok(ainfo_toks); if cursor(new_tok)[-1:] != tok { slice_constraint_fail(info, ainfo_msgs, new_tok, & msg_last); return }
+					tok            = new_tok
 					tok^           = transmute(Raw_String) slice(src_cursor, 0)
 					was_formatting = true
 					num           += 1
@@ -1639,20 +1644,23 @@ api_watl_lex :: proc(info: ^WATL_LexInfo, source: string,
 				src_cursor = src_cursor[1:]
 				tok.len   += 1
 			case .Line_Feed:
-				tok            = alloc_tok(ainfo_toks)
+				new_tok       := alloc_tok(ainfo_toks); if cursor(new_tok)[-1:] != tok { slice_constraint_fail(info, ainfo_msgs, new_tok, & msg_last); return }
+				tok            = new_tok
 				tok^           = transmute(Raw_String) slice(src_cursor, 1)
 				src_cursor     = src_cursor[1:]
 				was_formatting = true
 				num           += 1
 			case .Carriage_Return:
-				tok            = alloc_tok(ainfo_toks)
+				new_tok       := alloc_tok(ainfo_toks); if cursor(new_tok)[-1:] != tok { slice_constraint_fail(info, ainfo_msgs, new_tok, & msg_last); return }
+				tok            = new_tok
 				tok^           = transmute(Raw_String) slice(src_cursor, 2)
 				src_cursor     = src_cursor[1:]
 				was_formatting = true
 				num           += 1
 			case:
 				if (was_formatting) {
-					tok            = alloc_tok(ainfo_toks)
+					new_tok       := alloc_tok(ainfo_toks); if cursor(new_tok)[-1:] != tok { slice_constraint_fail(info, ainfo_msgs, new_tok, & msg_last); return }
+					tok            = new_tok
 					tok^           = transmute(Raw_String) slice(src_cursor, 0)
 					was_formatting = false;
 					num           += 1
@@ -1663,16 +1671,16 @@ api_watl_lex :: proc(info: ^WATL_LexInfo, source: string,
 		prev = src_cursor[-1:]
 		code = src_cursor[0]
 	}
-	end_snapshot := allocator_query(ainfo_toks)
-	num_bytes    := end_snapshot.save_point.slot - start_snapshot.save_point.slot
-	if num_bytes > start_snapshot.left {
+	return
+	slice_constraint_fail :: proc(info: ^WATL_LexInfo, ainfo_msgs: AllocatorInfo, tok: ^Raw_String, msg_last: ^^WATL_LexMsg) {
 		info.signal |= { .MemFail_SliceConstraintFail }
 		msg         := alloc_type(ainfo_msgs, WATL_LexMsg)
 		assert(msg != nil)
 		msg.pos     = { -1, -1 }
 		msg.tok     = transmute(^WATL_Tok) tok
 		msg.content = "Token slice allocation was not contiguous"
-		sll_queue_push_n(& info.msgs, & msg_last, & msg)
+		sll_queue_push_n(& info.msgs, msg_last, & msg)
+		return
 	}
 }
 watl_lex_stack :: #force_inline proc(source: string,
