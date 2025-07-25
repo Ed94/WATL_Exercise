@@ -4,6 +4,10 @@ import-module $misc
 $devshell  = join-path $PSScriptRoot 'helpers/devshell.ps1'
 $path_root = Get-ScriptRepoRoot
 
+$path_root      = split-path -Path $PSScriptRoot -Parent
+$path_toolchain = join-path $path_root      'toolchain'
+$path_rad       = join-path $path_toolchain 'rad'
+
 if ($IsWindows) {
 	& $devshell -arch amd64
 }
@@ -67,6 +71,8 @@ $flag_lib_list                     = '/LIST'
 $archiver = 'lib'
 $compiler = 'cl'
 $linker   = 'link'
+$radbin   = join-path $path_rad 'radbin.exe'
+$radlink  = join-path $path_rad 'radlink.exe'
 
 $path_build = join-path $path_root 'build'
 if ( -not(test-path -Path $path_build) ) {
@@ -74,6 +80,8 @@ if ( -not(test-path -Path $path_build) ) {
 }
 
 push-location $path_build
+
+write-host "Compiling"
 
 $compiler_args = @()
 $compiler_args += $flag_nologo
@@ -104,7 +112,7 @@ if ($false) {
 
 # Diagnostic logging
 $compiler_args += $flag_full_src_path
-$compiler_args += $flag_asm_listing_file
+# $compiler_args += $flag_asm_listing_file
 
 # $compiler_args += $flag_optimize_speed_max
 # $compiler_args += $flag_optimize_size
@@ -120,31 +128,37 @@ $compiler_args += $flag_link_win_rt_static
 # Include setup
 $compiler_args += ($flag_include + $path_root)
 
+$unit_name   = "watl.v0.msvc"
+
 # Specify unit to compile
-$unit           = join-path $path_root 'C\watl.v0.msvc.c'
+$unit           = join-path $path_root "C\$unit_name.c"
 $compiler_args += $flag_compile, $unit
 
 # Diagnoistc print for the args
 $compiler_args | ForEach-Object { Write-Host $_ }
-write-host
 
 # Compile the unit
 & $compiler $compiler_args
+write-host
 
-$binary = join-path $path_build 'watl.v0.msvc.exe'
-$object = join-path $path_build 'watl.v0.msvc.obj'
+$binary = join-path $path_build "$unit_name.exe"
+$object = join-path $path_build "$unit_name.obj"
 
-$pdb = join-path $path_build 'watl.v0.msvc.pdb'
-$map = join-path $path_build 'watl.v0.msvc.map'
+$pdb         = join-path $path_build "$unit_name.pdb"
+$map         = join-path $path_build "$unit_name.map"
+$rdi         = join-path $path_build "$unit_name.rdi"
+$rdi_listing = join-path $path_build "$unit_name.rdi.list"
 
 if ($true) {
+	write-host "Linking"
+
 	$linker_args = @()
 	$linker_args += $flag_nologo
 	$linker_args += $flag_link_win_machine_64
 	$linker_args += $flag_link_no_incremental
 	$linker_args += ($flag_link_win_path_output + $binary)
 
-	$linker_args += $flag_link_win_debug
+	$linker_args += "$flag_link_win_debug"
 	$linker_args += $flag_link_win_pdb + $pdb
 	$linker_args += $flag_link_mapfile + $map
 
@@ -152,9 +166,24 @@ if ($true) {
 
 	# Diagnoistc print for the args
 	$linker_args | ForEach-Object { Write-Host $_ }
-	write-host
 
 	& $linker $linker_args
+	# & $radlink $linker_args
+	write-host
+}
+
+if ($true) {
+	write-host "Dumping Debug Info"
+
+	$rbin_out  = '--out:'
+	$rbin_dump = '--dump'
+
+	$nargs = @($pdb, ($rbin_out + $rdi))
+	& $radbin $nargs
+
+	$nargs = @($rbin_dump, $rdi)
+	$dump = & $radbin $nargs
+	$dump > $rdi_listing
 }
 
 Pop-Location
