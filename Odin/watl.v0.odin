@@ -42,6 +42,7 @@ copy_non_overlapping :: proc {
 }
 cursor :: proc {
 	slice_cursor,
+	string_cursor,
 }
 end :: proc {
 	slice_end,
@@ -154,19 +155,19 @@ sll_stack_push_n :: proc "contextless" (curr, n, n_link: ^^$Type) {
     (n_link ^) = (curr ^)
     (curr   ^) = (n    ^)
 }
-sll_queue_push_nz :: proc "contextless" (nil_val: ^$Type, first, last, n: ^^Type) {
+sll_queue_push_nz :: proc "contextless" (first: ^$ParentType, last, n: ^^$Type, nil_val: ^Type) {
 	if (first ^) == nil_val {
-		(first ^) = n
-		(last  ^) = n
-		n.next = nil_val
+		(first ^) = n^
+		(last  ^) = n^
+		n^.next = nil_val
 	}
 	else {
-		(last ^).next = n
-		(last ^)      = n
-		n.next        = nil_val
+		(last ^).next = n^
+		(last ^)      = n^
+		n^.next        = nil_val
 	}
 }
-sll_queue_push_n :: #force_inline proc "contextless" (first: ^$Type, last, n: ^^Type) { sll_queue_push_nz(nil, first, last, n) }
+sll_queue_push_n :: #force_inline proc "contextless" (first: $ParentType, last, n: ^^$Type) { sll_queue_push_nz(first, last, n, nil) }
 //endregion Memory
 
 //region Allocator Interface
@@ -342,9 +343,10 @@ Raw_String :: struct {
 	data: [^]byte,
 	len:     int,
 }
-string_copy   :: proc(dst, src: string) { slice_copy  (transmute([]byte) dst, transmute([]byte) src) }
-string_end    :: proc(s: string) -> ^u8 { return slice_end (transmute([]byte) s) }
-string_assert :: proc(s: string)        { slice_assert(transmute([]byte) s) }
+string_cursor :: proc(s: string) -> [^]u8 { return slice_cursor(transmute([]byte) s) }
+string_copy   :: proc(dst, src: string)   { slice_copy  (transmute([]byte) dst, transmute([]byte) src) }
+string_end    :: proc(s: string) -> ^u8   { return slice_end (transmute([]byte) s) }
+string_assert :: proc(s: string)          { slice_assert(transmute([]byte) s) }
 //endregion Strings
 
 //region FArena
@@ -1605,9 +1607,75 @@ api_watl_lex :: proc(info: ^WATL_LexInfo, source: string,
 	failon_unsupported_codepoints: b8 = false, 
 	failon_pos_untrackable:        b8 = false,
 	failon_slice_constraint_fail : b8 = false,
-) {
+) 
+{
+	if len(source) == 0 do return
+	assert(info != nil)
+	assert(ainfo_msgs.procedure != nil)
+	assert(ainfo_toks.procedure != nil)
+	start_snapshot := allocator_query(ainfo_toks)
+	msg_last : ^WATL_LexMsg
+
+	src_cursor := cursor(source)
+	end        := src_cursor[len(source):]
+	prev       := src_cursor[-1:]
+	code       := src_cursor[0]
+	tok : ^Raw_String
+	num : i32 = 0
+	was_formatting := true
+	for ; src_cursor < end;
+	{
+		alloc_tok :: #force_inline proc(ainfo: AllocatorInfo) -> ^Raw_String { return alloc_type(ainfo, Raw_String, align_of(Raw_String), true) }
+		#partial switch cast(WATL_TokKind) code
+		{
+			case .Space: fallthrough
+			case .Tab: 
+				if prev[0] != src_cursor[0] {
+					tok            = alloc_tok(ainfo_toks)
+					tok^           = transmute(Raw_String) slice(src_cursor, 0)
+					was_formatting = true
+					num           += 1
+				}
+				src_cursor = src_cursor[1:]
+				tok.len   += 1
+			case .Line_Feed:
+				tok            = alloc_tok(ainfo_toks)
+				tok^           = transmute(Raw_String) slice(src_cursor, 1)
+				src_cursor     = src_cursor[1:]
+				was_formatting = true
+				num           += 1
+			case .Carriage_Return:
+				tok            = alloc_tok(ainfo_toks)
+				tok^           = transmute(Raw_String) slice(src_cursor, 2)
+				src_cursor     = src_cursor[1:]
+				was_formatting = true
+				num           += 1
+			case:
+				if (was_formatting) {
+					tok            = alloc_tok(ainfo_toks)
+					tok^           = transmute(Raw_String) slice(src_cursor, 0)
+					was_formatting = false;
+					num           += 1
+				}
+				src_cursor  = src_cursor[1:]
+				tok.len    += 1
+		}
+		prev = src_cursor[-1:]
+		code = src_cursor[0]
+	}
+	end_snapshot := allocator_query(ainfo_toks)
+	num_bytes    := end_snapshot.save_point.slot - start_snapshot.save_point.slot
+	if num_bytes > start_snapshot.left {
+		info.signal |= { .MemFail_SliceConstraintFail }
+		msg         := alloc_type(ainfo_msgs, WATL_LexMsg)
+		assert(msg != nil)
+		msg.pos     = { -1, -1 }
+		msg.tok     = transmute(^WATL_Tok) tok
+		msg.content = "Token slice allocation was not contiguous"
+		sll_queue_push_n(& info.msgs, & msg_last, & msg)
+	}
 }
-watl_lex_stack :: proc(source: string,
+watl_lex_stack :: #force_inline proc(source: string,
 	ainfo_msgs:                    AllocatorInfo, 
 	ainfo_toks:                    AllocatorInfo, 
 	failon_unsupported_codepoints: b8 = false, 
@@ -1615,6 +1683,13 @@ watl_lex_stack :: proc(source: string,
 	failon_slice_constraint_fail : b8 = false,
 ) -> (info: WATL_LexInfo)
 {
+	api_watl_lex(& info, 
+		source, 
+		ainfo_msgs,
+		ainfo_toks,
+		failon_unsupported_codepoints,
+		failon_slice_constraint_fail,
+		failon_pos_untrackable)
 	return
 }
 WATL_Node :: string
@@ -1643,7 +1718,7 @@ api_watl_parse :: proc(info: ^WATL_ParseInfo, tokens: []WATL_Tok,
 	failon_slice_constraint_fail: b32,
 ) {
 }
-watl_parse_stack :: proc(tokens: []WATL_Tok, 
+watl_parse_stack :: #force_inline proc(tokens: []WATL_Tok, 
 	ainfo_msgs:  AllocatorInfo,
 	ainfo_nodes: AllocatorInfo,
 	ainfo_lines: AllocatorInfo,
@@ -1651,6 +1726,13 @@ watl_parse_stack :: proc(tokens: []WATL_Tok,
 	failon_slice_constraint_fail: b32,
 ) -> (info: WATL_ParseInfo) 
 {
+	api_watl_parse(& info, 
+	tokens,
+	ainfo_msgs,
+	ainfo_nodes,
+	ainfo_lines,
+	str_cache,
+	failon_slice_constraint_fail)
 	return
 }
 watl_dump_listing :: proc(buffer: AllocatorInfo, lines: []WATL_Line) -> string {

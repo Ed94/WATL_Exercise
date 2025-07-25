@@ -1994,13 +1994,11 @@ void assert_handler( char const* condition, char const* file, char const* functi
 #pragma region WATL
 void api_watl_lex(WATL_LexInfo* info, Str8 source, Opts_watl_lex* opts)
 {
-
 	if (source.len == 0) { return; }
 	assert(info                  != nullptr);
 	assert(opts                  != nullptr);
 	assert(opts->ainfo_msgs.proc != nullptr);
 	assert(opts->ainfo_toks.proc != nullptr);
-	// AllocatorQueryInfo start_snapshot = allocator_query(opts->ainfo_toks);
 	WATL_LexMsg* msg_last = nullptr;
 
 	UTF8* end    = source.ptr + source.len;
@@ -2092,8 +2090,6 @@ void api_watl_parse(WATL_ParseInfo* info, Slice_WATL_Tok tokens, Opts_watl_parse
 	assert(opts->ainfo_msgs.proc  != nullptr);
 	assert(opts->ainfo_nodes.proc != nullptr);
 	assert(opts->str_cache        != nullptr);
-	// AllocatorQueryInfo start_lines_snapshot = allocator_query(opts->ainfo_lines);
-	// AllocatorQueryInfo start_nodes_snapshot = allocator_query(opts->ainfo_nodes);
 	WATL_ParseMsg* msg_last = nullptr;
 
 	WATL_Line* line = alloc_type(opts->ainfo_lines, WATL_Line);
@@ -2127,7 +2123,7 @@ void api_watl_parse(WATL_ParseInfo* info, Slice_WATL_Tok tokens, Opts_watl_parse
 			default:
 			break;
 		}
-		* curr     = cache_str8(opts->str_cache, * token);
+		* curr = cache_str8(opts->str_cache, * token);
 		WATL_Node* new_node = alloc_type(opts->ainfo_nodes, WATL_Node); if (new_node - 1 != curr) { 
 			info->signal |= WATL_ParseStatus_MemFail_SliceConstraintFail;
 			WATL_ParseMsg* msg = alloc_type(opts->ainfo_msgs, WATL_ParseMsg);
