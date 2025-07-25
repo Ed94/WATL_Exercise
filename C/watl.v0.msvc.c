@@ -1152,6 +1152,7 @@ void varena_allocator_proc(AllocatorProc_In in, AllocatorProc_Out* out)
 				return;
 			}
 			SSIZE current_offset = vm->reserve_start + vm->commit_used;
+			// Growing when not the last allocation not allowed
 			assert(in.old_allocation.ptr == cast(Byte*, current_offset));
 			Slice_Byte allocation = varena_push_array(vm, Byte, grow_amount, .alignment = in.alignment);
 			assert(allocation.ptr != nullptr);
@@ -1993,31 +1994,33 @@ void assert_handler( char const* condition, char const* file, char const* functi
 #pragma region WATL
 void api_watl_lex(WATL_LexInfo* info, Str8 source, Opts_watl_lex* opts)
 {
+
 	if (source.len == 0) { return; }
 	assert(info                  != nullptr);
 	assert(opts                  != nullptr);
 	assert(opts->ainfo_msgs.proc != nullptr);
 	assert(opts->ainfo_toks.proc != nullptr);
-	AllocatorQueryInfo start_snapshot = allocator_query(opts->ainfo_toks);
+	// AllocatorQueryInfo start_snapshot = allocator_query(opts->ainfo_toks);
 	WATL_LexMsg* msg_last = nullptr;
 
 	UTF8* end    = source.ptr + source.len;
 	UTF8* cursor = source.ptr;
 	UTF8* prev   = cursor - 1;
 	UTF8  code   = * cursor;
-	B32       was_formatting = true;
 	WATL_Tok* tok            = nullptr;
 	S32       num            = 0;
+	B32       was_formatting = true;
 	for (; cursor < end;)
 	{
-	#define alloc_tok() alloc_type(opts->ainfo_toks, WATL_Tok, .alignment = alignof(WATL_Tok))
+	#define alloc_tok() alloc_type(opts->ainfo_toks, WATL_Tok, .alignment = alignof(WATL_Tok), .no_zero = true)
 		switch (code)
 		{
 			case WATL_Tok_Space:
 			case WATL_Tok_Tab:
 			{
 				if (* prev != * cursor) {
-					tok            = alloc_tok();
+					WATL_Tok* new_tok = alloc_tok(); if (new_tok - 1 != tok) { goto slice_constraint_fail; }
+					tok            = new_tok;
 					* tok          = (WATL_Tok){ cursor, 0 };
 					was_formatting = true;
 					++ num;
@@ -2027,7 +2030,8 @@ void api_watl_lex(WATL_LexInfo* info, Str8 source, Opts_watl_lex* opts)
 			}
 			break;
 			case WATL_Tok_LineFeed: {
-				tok            = alloc_tok();
+					WATL_Tok* new_tok = alloc_tok(); if (new_tok - 1 != tok) { goto slice_constraint_fail; }
+					tok          = new_tok;
 				* tok          = (WATL_Tok){ cursor, 1 };
 				cursor        += 1;
 				was_formatting = true;
@@ -2036,7 +2040,8 @@ void api_watl_lex(WATL_LexInfo* info, Str8 source, Opts_watl_lex* opts)
 			break;
 			// Assuming what comes after is line feed.
 			case WATL_Tok_CarriageReturn: {
-				tok            = alloc_tok();
+					WATL_Tok* new_tok = alloc_tok(); if (new_tok - 1 != tok) { goto slice_constraint_fail; }
+					tok          = new_tok;
 				* tok          = (WATL_Tok){ cursor, 2 };
 				cursor        += 2;
 				was_formatting = true;
@@ -2046,7 +2051,8 @@ void api_watl_lex(WATL_LexInfo* info, Str8 source, Opts_watl_lex* opts)
 			default:
 			{
 				if (was_formatting) {
-					tok            = alloc_tok();
+					WATL_Tok* new_tok = alloc_tok(); if (new_tok - 1 != tok) { goto slice_constraint_fail; }
+					tok            = new_tok;
 					* tok          = (WATL_Tok){ cursor, 0 };
 					was_formatting = false;
 					++ num;
@@ -2060,22 +2066,21 @@ void api_watl_lex(WATL_LexInfo* info, Str8 source, Opts_watl_lex* opts)
 		code = * cursor;
 	#undef alloc_tok
 	}
-	AllocatorQueryInfo end_snapshot = allocator_query(opts->ainfo_toks);
-	SSIZE num_bytes = end_snapshot.save_point.slot - start_snapshot.save_point.slot;
-	if (num_bytes > start_snapshot.left) {
-		info->signal |= WATL_LexStatus_MemFail_SliceConstraintFail;
-		WATL_LexMsg* msg = alloc_type(opts->ainfo_msgs, WATL_LexMsg);
-		assert(msg != nullptr);
-		msg->pos     = (WATL_Pos){ -1, -1 };
-		msg->tok     = tok;
-		msg->content = lit("Token slice allocation was not contiguous");
-		sll_queue_push_n(info->msgs, msg_last, msg, next);
-		assert(opts->failon_slice_constraint_fail == false);
-	}
 	assert(tok != nullptr);
 	assert(num > 0);
 	info->toks.ptr = tok - num + 1;
 	info->toks.len = num;
+	return;
+slice_constraint_fail:
+	info->signal |= WATL_LexStatus_MemFail_SliceConstraintFail;
+	WATL_LexMsg* msg = alloc_type(opts->ainfo_msgs, WATL_LexMsg);
+	assert(msg != nullptr);
+	msg->pos     = (WATL_Pos){ -1, -1 };
+	msg->tok     = tok;
+	msg->content = lit("Token slice allocation was not contiguous");
+	sll_queue_push_n(info->msgs, msg_last, msg, next);
+	assert(opts->failon_slice_constraint_fail == false);
+	return;
 }
 inline WATL_LexInfo watl__lex(Str8 source, Opts_watl_lex* opts) { WATL_LexInfo info = {0}; api_watl_lex(& info, source, opts); return info; }
 
@@ -2087,8 +2092,8 @@ void api_watl_parse(WATL_ParseInfo* info, Slice_WATL_Tok tokens, Opts_watl_parse
 	assert(opts->ainfo_msgs.proc  != nullptr);
 	assert(opts->ainfo_nodes.proc != nullptr);
 	assert(opts->str_cache        != nullptr);
-	AllocatorQueryInfo start_lines_snapshot = allocator_query(opts->ainfo_lines);
-	AllocatorQueryInfo start_nodes_snapshot = allocator_query(opts->ainfo_nodes);
+	// AllocatorQueryInfo start_lines_snapshot = allocator_query(opts->ainfo_lines);
+	// AllocatorQueryInfo start_nodes_snapshot = allocator_query(opts->ainfo_nodes);
 	WATL_ParseMsg* msg_last = nullptr;
 
 	WATL_Line* line = alloc_type(opts->ainfo_lines, WATL_Line);
@@ -2103,19 +2108,15 @@ void api_watl_parse(WATL_ParseInfo* info, Slice_WATL_Tok tokens, Opts_watl_parse
 			case WATL_Tok_CarriageReturn:
 			case WATL_Tok_LineFeed:
 			{
-				AllocatorQueryInfo end_nodes_snapshot = allocator_query(opts->ainfo_nodes);
-				SSIZE distance_nodes = end_nodes_snapshot.save_point.slot - start_nodes_snapshot.save_point.slot;
-				if (distance_nodes > start_lines_snapshot.left) {
+				WATL_Line* new_line = alloc_type(opts->ainfo_lines, WATL_Line); if (new_line - 1 != line) {
 					info->signal |= WATL_ParseStatus_MemFail_SliceConstraintFail;
 					WATL_ParseMsg* msg = alloc_type(opts->ainfo_msgs, WATL_ParseMsg);
-					msg->content = lit("Nodes slice allocation was not contiguous");
-					msg->pos     = (WATL_Pos){cast(S32, info->lines.len), cast(S32, line->len)};
-					msg->line    = line;
-					msg->tok     = token;
+					msg->content = lit("Line slice allocation was not contiguous");
+					msg->pos     = (WATL_Pos){-1, -1};
 					sll_queue_push_n(info->msgs, msg_last, msg, next);
 					assert(opts->failon_slice_constraint_fail == false);
+					return;
 				}
-				WATL_Line* new_line = alloc_type(opts->ainfo_lines, WATL_Line);
 				line             = new_line;
 				line->ptr        = curr;
 				line->len        = 0;
@@ -2127,23 +2128,23 @@ void api_watl_parse(WATL_ParseInfo* info, Slice_WATL_Tok tokens, Opts_watl_parse
 			break;
 		}
 		* curr     = cache_str8(opts->str_cache, * token);
-		curr       = alloc_type(opts->ainfo_nodes, WATL_Node);
+		WATL_Node* new_node = alloc_type(opts->ainfo_nodes, WATL_Node); if (new_node - 1 != curr) { 
+			info->signal |= WATL_ParseStatus_MemFail_SliceConstraintFail;
+			WATL_ParseMsg* msg = alloc_type(opts->ainfo_msgs, WATL_ParseMsg);
+			msg->content = lit("Nodes slice allocation was not contiguous");
+			msg->pos     = (WATL_Pos){cast(S32, info->lines.len), cast(S32, line->len)};
+			msg->line    = line;
+			msg->tok     = token;
+			sll_queue_push_n(info->msgs, msg_last, msg, next);
+			assert(opts->failon_slice_constraint_fail == false);
+			return;
+		}
+		curr       = new_node;
 		* curr     = (WATL_Node){0};
 		line->len += 1;
 		continue;
 	}
-	AllocatorQueryInfo end_lines_snapshot = allocator_query(opts->ainfo_lines);
-
-	SSIZE distance_lines = end_lines_snapshot.save_point.slot - start_lines_snapshot.save_point.slot;
-	if (distance_lines > start_lines_snapshot.left) {
-		info->signal |= WATL_ParseStatus_MemFail_SliceConstraintFail;
-		WATL_ParseMsg* msg = alloc_type(opts->ainfo_msgs, WATL_ParseMsg);
-		msg->content = lit("Line slice allocation was not contiguous");
-		msg->pos     = (WATL_Pos){-1, -1};
-		sll_queue_push_n(info->msgs, msg_last, msg, next);
-		assert(opts->failon_slice_constraint_fail == false);
-		return;
-	}
+	return;
 }
 inline WATL_ParseInfo watl__parse(Slice_WATL_Tok tokens, Opts_watl_parse* opts) { WATL_ParseInfo info = {0}; api_watl_parse(& info, tokens, opts); return info; }
 
