@@ -2,6 +2,8 @@
 
 Documention for the file is kept separate for the sake of compact definitions.
 
+***TODO(Ed): This doc is outdated!***
+
 ## Organization
 
 The file is segregated with region pragmas with the following hierarchy

@@ -1,10 +1,10 @@
 # WATL Exercise
 
-An exercise on making the simplest useful parser with different languages or conventions.  
-The purpose of this exercise is convey succiently many pragmatic concepts for code in a small program.  
+An exercise on making the "Whitespace Aware Text Layout" parser with different languages or conventions. It simply gets a structural idea of the lines and chunks (visbile and whitespace) for a text file.  
+The purpose of this exercise is convey succiently many core pragmatic concepts for code in a small program.  
 The intent was to use this as a working set of samples for my code visualizing and editing prototyping.
 
-The C code conveys a convention for doing C I've synthesized after studying how several people in the "handmade" community have written their exposed libraries or codebases.
+The code conveys a convention for doing "systems" programming I've synthesized after studying how several people in the "handmade" community have written their exposed libraries or codebases.
 
 The goal of the exercise is always the following:
 
@@ -33,16 +33,12 @@ Embeddable scripting languages will be embedded as they should be.
 
 ## TODOs
 
-Not all of these may ever be completed...
-
 * [x] Single-threaded C example
 * [] Multi-threaded C example
 * [] Add basic timing benchmark to C examples
 * [] Add profiling support C examples
-* [] Make C++ examples
-* [] Add basic timing benchmark to C++ examples
-* [] Add profiling support C++ examples
 * [x] Single-threaded Odin example
+* [] Single-threaded Odin ideomatic example
 * [] Add basic timing benchmark to Odin examples
 * [] Add profiling support Odin examples
 * [] Single-threaded nasm example
@@ -51,6 +47,12 @@ Not all of these may ever be completed...
 * [] Multi-threaded FORTH example
 * [] Single-threaded lua example
 * [] Multi-threaded lua example
+
+### Maybe
+
+* [] Make C++ examples
+* [] Add basic timing benchmark to C++ examples
+* [] Add profiling support C++ examples
 * [] Single-threaded C# example
 * [] Multi-threaded C# example
 * [] Single-threaded F# example

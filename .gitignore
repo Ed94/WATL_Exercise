@@ -2,3 +2,5 @@
 build
 .vscode
 C/watl.v0.msvc.c.listing.txt
+watl_exercise.user
+watl_exercise.proj
