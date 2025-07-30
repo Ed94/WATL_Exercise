@@ -172,7 +172,7 @@ if ($true) {
 	write-host
 }
 
-if ($true) {
+if ($false) {
 	write-host "Dumping Debug Info"
 
 	$rbin_out  = '--out:'

@@ -1036,8 +1036,8 @@ void os_init(void) {
 inline Byte* os__vmem_reserve(SSIZE size, Opts_vmem* opts) {
 	assert(opts != nullptr);
 	void* result = VirtualAlloc(cast(void*, opts->base_addr), size
-		,	MS_MEM_RESERVE|MS_MEM_COMMIT
-		// |(opts->no_large_pages == false ? MS_MEM_LARGE_PAGES : 0)
+		,	MS_MEM_RESERVE
+		// |MS_MEM_COMMIT|(opts->no_large_pages == false ? MS_MEM_LARGE_PAGES : 0)
 		,	MS_PAGE_READWRITE
 	);
 	return result;
@@ -2017,7 +2017,7 @@ void api_watl_lex(WATL_LexInfo* info, Str8 source, Opts_watl_lex* opts)
 			case WATL_Tok_Tab:
 			{
 				if (* prev != * cursor) {
-					WATL_Tok* new_tok = alloc_tok(); if (new_tok - 1 != tok) { goto slice_constraint_fail; }
+					WATL_Tok* new_tok = alloc_tok(); if (new_tok - 1 != tok && tok != nullptr) { goto slice_constraint_fail; }
 					tok            = new_tok;
 					* tok          = (WATL_Tok){ cursor, 0 };
 					was_formatting = true;
@@ -2028,7 +2028,7 @@ void api_watl_lex(WATL_LexInfo* info, Str8 source, Opts_watl_lex* opts)
 			}
 			break;
 			case WATL_Tok_LineFeed: {
-					WATL_Tok* new_tok = alloc_tok(); if (new_tok - 1 != tok) { goto slice_constraint_fail; }
+					WATL_Tok* new_tok = alloc_tok(); if (new_tok - 1 != tok && tok != nullptr) { goto slice_constraint_fail; }
 					tok          = new_tok;
 				* tok          = (WATL_Tok){ cursor, 1 };
 				cursor        += 1;
@@ -2038,7 +2038,7 @@ void api_watl_lex(WATL_LexInfo* info, Str8 source, Opts_watl_lex* opts)
 			break;
 			// Assuming what comes after is line feed.
 			case WATL_Tok_CarriageReturn: {
-					WATL_Tok* new_tok = alloc_tok(); if (new_tok - 1 != tok) { goto slice_constraint_fail; }
+					WATL_Tok* new_tok = alloc_tok(); if (new_tok - 1 != tok && tok != nullptr) { goto slice_constraint_fail; }
 					tok          = new_tok;
 				* tok          = (WATL_Tok){ cursor, 2 };
 				cursor        += 2;
@@ -2049,7 +2049,7 @@ void api_watl_lex(WATL_LexInfo* info, Str8 source, Opts_watl_lex* opts)
 			default:
 			{
 				if (was_formatting) {
-					WATL_Tok* new_tok = alloc_tok(); if (new_tok - 1 != tok) { goto slice_constraint_fail; }
+					WATL_Tok* new_tok = alloc_tok(); if (new_tok - 1 != tok && tok != nullptr) { goto slice_constraint_fail; }
 					tok            = new_tok;
 					* tok          = (WATL_Tok){ cursor, 0 };
 					was_formatting = false;

@@ -132,7 +132,7 @@ slice_assert :: #force_inline proc (s: $SliceType / []$Type) {
 	assert(len(s) > 0)
 	assert(s != nil)
 }
-slice_end :: #force_inline proc "contextless" (s : $SliceType / []$Type) -> ^Type { return & s[len(s) - 1] }
+slice_end :: #force_inline proc "contextless" (s : $SliceType / []$Type) -> ^Type { return & cursor(s)[len(s)] }
 
 @(require_results) slice_to_bytes :: proc "contextless" (s: []$Type) -> []byte         { return ([^]byte)(raw_data(s))[:len(s) * size_of(Type)] }
 @(require_results) slice_raw      :: proc "contextless" (s: []$Type) -> SliceRaw(Type) { return transmute(SliceRaw(Type)) s }
@@ -564,7 +564,8 @@ os_vmem_commit :: proc(vm: rawptr, size: int, no_large_pages: b32 = false) -> b3
 }
 os_vmem_reserve :: proc(size: int, base_addr: int = 0, no_large_pages: b32 = false) -> rawptr {
 	result := VirtualAlloc(rawptr(uintptr(base_addr)), uintptr(size),
-		MS_MEM_RESERVE | MS_MEM_COMMIT,
+		MS_MEM_RESERVE,
+		// MS_MEM_COMMIT
 		// | (no_large_pages ? 0 : MS_MEM_LARGE_PAGES), // Large pages disabled
 		MS_PAGE_READWRITE)
 	return result
@@ -1022,7 +1023,7 @@ kt1cx_init :: proc(info: KT1CX_Info, m: KT1CX_InfoMeta, result: ^KT1CX_Byte) {
 	assert(m.type_width     >  0)
 	table_raw       := transmute(SliceByte) mem_alloc(info.backing_table, m.table_size * m.cell_size)
 	slice_assert(transmute([]byte) table_raw)
-	result.cell_pool = mem_alloc(info.backing_cells, m.cell_pool_size * m.cell_size)
+	result.cell_pool = mem_alloc(info.backing_cells, m.cell_size * m.cell_pool_size)
 	slice_assert(result.cell_pool)
 	table_raw.len = m.table_size
 	result.table  = transmute([]byte) table_raw
@@ -1050,6 +1051,7 @@ kt1cx_clear :: proc(kt: KT1CX_Byte, m: KT1CX_ByteMeta) {
 	}
 }
 kt1cx_slot_id :: proc(kt: KT1CX_Byte, key: u64, m: KT1CX_ByteMeta) -> u64 {
+	cell_size := m.cell_size // dummy value
 	hash_index := key % u64(len(kt.table))
 	return hash_index
 }
@@ -1127,7 +1129,7 @@ kt1cx_assert :: proc(kt: $type / KT1CX) {
 	slice_assert(kt.cell_pool)
 	slice_assert(kt.table)
 }
-kt1cx_byte :: proc(kt: $type / KT1CX) -> KT1CX_Byte { return { slice_to_bytes(kt.cell_pool), slice_to_bytes(kt.table) } }
+kt1cx_byte :: proc(kt: $type / KT1CX) -> KT1CX_Byte { return { slice_to_bytes(kt.cell_pool), slice( transmute([^]byte) cursor(kt.table), len(kt.table)) } }
 //endregion Key Table 1-Layer Chained-Chunked-Cells (KT1CX)
 
 //region String Operations
@@ -1225,7 +1227,7 @@ str8_fmt_kt1l :: proc(ainfo: AllocatorInfo, _buffer: ^[]byte, table: []KT1L_Slot
 	{
 		// Forward until we hit the delimiter '<' or the template's contents are exhausted.
 		for ; curr_code != '<' && cursor_fmt != end(fmt_template); {
-			cursor_buffer     = cursor_fmt
+			cursor_buffer[0]  = cursor_fmt   [0]
 			cursor_buffer     = cursor_buffer[1:]
 			cursor_fmt        = cursor_fmt   [1:]
 			curr_code         = cursor_fmt   [0]
@@ -1246,7 +1248,7 @@ str8_fmt_kt1l :: proc(ainfo: AllocatorInfo, _buffer: ^[]byte, table: []KT1L_Slot
 			}
 			if fmt_overflow do continue
 			// Hashing the potential token and cross checking it with our token table
-			key   : u64     = 0; hash64_djb8(& key, slice(cursor_fmt, potential_token_length))
+			key   : u64     = 0; hash64_djb8(& key, slice(cursor_potential_token, potential_token_length))
 			value : ^string = nil
 			for & token in table 
 			{
@@ -1266,11 +1268,12 @@ str8_fmt_kt1l :: proc(ainfo: AllocatorInfo, _buffer: ^[]byte, table: []KT1L_Slot
 				left         := len(value)
 				cursor_value := cursor(transmute([]u8) value^)
 				for ; left > 0 && buffer_remaining > 0; {
-					cursor_buffer     = cursor_value
+					cursor_buffer[0]  = cursor_value [0]
 					cursor_buffer     = cursor_buffer[1:]
+					cursor_value      = cursor_value [1:]
 					cursor_fmt        = cursor_fmt   [1:]
 					buffer_remaining -= 1
-					left_fmt         -= 1
+					left             -= 1
 				}
 				// Sync cursor format to after the processed token
 				cursor_fmt = cursor_potential_token[potential_token_length + 1:]
@@ -1278,7 +1281,7 @@ str8_fmt_kt1l :: proc(ainfo: AllocatorInfo, _buffer: ^[]byte, table: []KT1L_Slot
 				left_fmt  -= potential_token_length + 2 // The 2 here are the '<' & '>' delimiters being omitted.
 				continue
 			}
-			cursor_buffer     = cursor_fmt
+			cursor_buffer[0]  = cursor_fmt   [0]
 			cursor_buffer     = cursor_buffer[1:]
 			cursor_fmt        = cursor_fmt   [1:]
 			curr_code         = cursor_fmt   [0]
@@ -1336,6 +1339,7 @@ str8cache_init :: proc(cache: ^Str8Cache, str_reserve, cell_reserve, tbl_backing
 		slot_key_offset  = offset_of(KT1CX_Slot_Str8, key),
 		cell_next_offset = offset_of(KT1CX_Cell_Str8, next),
 		cell_depth       = Str8Cache_CELL_DEPTH,
+		cell_size        = size_of(KT1CX_Cell_Str8),
 		type_width       = size_of(string),
 		type             = string
 	}
@@ -1415,7 +1419,7 @@ str8gen_init :: proc(gen: ^Str8Gen, ainfo: AllocatorInfo) {
 	gen.cap = Kilo * 4
 }
 str8gen_make :: proc(ainfo: AllocatorInfo) -> Str8Gen { gen: Str8Gen; str8gen_init(& gen, ainfo); return gen }
-str8gen_to_bytes  :: proc(gen: Str8Gen) -> []byte { return transmute([]byte) SliceByte {data = gen.ptr, len = gen.len} }
+str8gen_to_bytes  :: proc(gen: Str8Gen) -> []byte { return transmute([]byte) SliceByte {data = gen.ptr, len = gen.cap} }
 str8_from_str8gen :: proc(gen: Str8Gen) -> string { return transmute(string) SliceByte {data = gen.ptr, len = gen.len} }
 
 str8gen_append_str8 :: proc(gen: ^Str8Gen, str: string) {
@@ -1634,7 +1638,7 @@ api_watl_lex :: proc(info: ^WATL_LexInfo, source: string,
 			case .Space: fallthrough
 			case .Tab: 
 				if prev[0] != src_cursor[0] {
-					new_tok       := alloc_tok(ainfo_toks); if cursor(new_tok)[-1:] != tok { 
+					new_tok       := alloc_tok(ainfo_toks); if cursor(new_tok)[-1:] != tok && tok != nil { 
 						slice_constraint_fail(info, ainfo_msgs, new_tok, & msg_last); 
 						return 
 					}
@@ -1646,7 +1650,7 @@ api_watl_lex :: proc(info: ^WATL_LexInfo, source: string,
 				src_cursor = src_cursor[1:]
 				tok.len   += 1
 			case .Line_Feed:
-				new_tok       := alloc_tok(ainfo_toks); if cursor(new_tok)[-1:] != tok { 
+				new_tok       := alloc_tok(ainfo_toks); if cursor(new_tok)[-1:] != tok && tok != nil{ 
 					slice_constraint_fail(info, ainfo_msgs, new_tok, & msg_last);
 					return 
 				}
@@ -1656,7 +1660,7 @@ api_watl_lex :: proc(info: ^WATL_LexInfo, source: string,
 				was_formatting = true
 				num           += 1
 			case .Carriage_Return:
-				new_tok       := alloc_tok(ainfo_toks); if cursor(new_tok)[-1:] != tok {
+				new_tok       := alloc_tok(ainfo_toks); if cursor(new_tok)[-1:] != tok && tok != nil {
 					slice_constraint_fail(info, ainfo_msgs, new_tok, & msg_last); 
 					return
 				}
@@ -1667,7 +1671,7 @@ api_watl_lex :: proc(info: ^WATL_LexInfo, source: string,
 				num           += 1
 			case:
 				if (was_formatting) {
-					new_tok       := alloc_tok(ainfo_toks); if cursor(new_tok)[-1:] != tok {
+					new_tok       := alloc_tok(ainfo_toks); if cursor(new_tok)[-1:] != tok && tok != nil {
 						slice_constraint_fail(info, ainfo_msgs, new_tok, & msg_last);
 						return
 					}
@@ -1758,7 +1762,7 @@ api_watl_parse :: proc(info: ^WATL_ParseInfo, tokens: []WATL_Tok,
 		{
 			case .Carriage_Return: fallthrough
 			case .Line_Feed:
-				new_line := alloc_type(ainfo_lines, WATL_Line); if cursor(new_line ^)[-1:] != line.data {
+				new_line := alloc_type(ainfo_lines, WATL_Line); if cursor(new_line)[-1:] != transmute(^[]string)line {
 					info.signal |= { .MemFail_SliceConstraintFail }
 					msg := alloc_type(ainfo_msgs, WATL_ParseMsg)
 					msg.content = "Line slice allocation was not contiguous"
@@ -1788,6 +1792,7 @@ api_watl_parse :: proc(info: ^WATL_ParseInfo, tokens: []WATL_Tok,
 			sll_queue_push_n(& info.msgs, & msg_last, & msg)
 			return
 		}
+		curr = new_node
 		line.len += 1
 		continue
 	}
@@ -1801,12 +1806,12 @@ watl_parse_stack :: #force_inline proc(tokens: []WATL_Tok,
 ) -> (info: WATL_ParseInfo) 
 {
 	api_watl_parse(& info, 
-	tokens,
-	ainfo_msgs,
-	ainfo_nodes,
-	ainfo_lines,
-	str_cache,
-	failon_slice_constraint_fail)
+		tokens,
+		ainfo_msgs,
+		ainfo_nodes,
+		ainfo_lines,
+		str_cache,
+		failon_slice_constraint_fail)
 	return
 }
 watl_dump_listing :: proc(buffer: AllocatorInfo, lines: []WATL_Line) -> string {
@@ -1835,6 +1840,7 @@ watl_dump_listing :: proc(buffer: AllocatorInfo, lines: []WATL_Line) -> string {
 				{ "chunk", chunk }
 			})
 		}
+		farena_reset(& sarena)
 	}
 	return str8_from_str8gen(result)
 }
@@ -1847,8 +1853,8 @@ main :: proc()
 	// Note(Ed): Possible compiler bug, cannot resolve proc map with named arguments.
 	
 	vm_file := varena_make(reserve_size = Giga * 4, flags = { .No_Large_Pages })
-	// file    := file_read_contents("watl.v0.msvc.c", backing = ainfo(vm_file))
-	file    := file_read_contents("watl.v0.msvc.c", ainfo(vm_file))
+	// file    := file_read_contents("watl.v0.win32.odin", backing = ainfo(vm_file))
+	file    := file_read_contents("watl.v0.win32.odin", ainfo(vm_file))
 	slice_assert(file.content)
 
 	a_msgs  := arena_make()
@@ -1890,6 +1896,6 @@ main :: proc()
 	arena_reset(a_msgs)
 	arena_reset(a_toks)
 	listing := watl_dump_listing(ainfo(a_msgs), parse_res.lines)
-	file_write_str8("watl.v0.odin.listing.txt", listing)
+	file_write_str8("watl.v0.win32.odin.listing.txt", listing)
 	return
 }
