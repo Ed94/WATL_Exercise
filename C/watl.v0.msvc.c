@@ -1366,7 +1366,6 @@ void arena_allocator_proc(AllocatorProc_In in, AllocatorProc_Out* out)
 }
 #pragma endregion Arena
 
-// Modern C+
 #pragma region Key Table 1-Layer Linear (KT1L)
 void kt1l__populate_slice_a2(KT1L_Byte*restrict kt, AllocatorInfo backing, KT1L_Meta m, Slice_Byte values, SSIZE num_values ) {
 	assert(kt != nullptr);

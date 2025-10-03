@@ -93,7 +93,7 @@ $compiler_args += $flag_c11
 # Constraints on C program code-gen 
 $compiler_args += $flag_exceptions_disabled
 $compiler_args += $flag_RTTI_disabled
-$compiler_args += $flag_preprocess_conform
+# $compiler_args += $flag_preprocess_conform
 # $compiler_args += $flag_sanitize_address
 
 $compiler_args += $flag_wall
@@ -103,7 +103,7 @@ $compiler_args += $flag_charset_utf8
 
 # Specifing output pathing
 $compiler_args += ( $flag_path_interm + $path_build + '\' )
-$compiler_args += ( $flag_path_output + $path_build + '\' )
+# $compiler_args += ( $flag_path_output + $path_build + '\' )
 
 # Dump preprocess file
 if ($false) {
@@ -141,7 +141,8 @@ $compiler_args += $flag_compile, $unit
 $compiler_args | ForEach-Object { Write-Host $_ }
 
 # Compile the unit
-& $compiler $compiler_args
+$compilation_time = Measure-Command { & $compiler $compiler_args }
+write-host "Compilation took $($compilation_time.TotalMilliseconds)ms"
 write-host
 
 $binary = join-path $path_build "$unit_name.exe"
@@ -174,8 +175,9 @@ if ($true) {
 	# Diagnoistc print for the args
 	$linker_args | ForEach-Object { Write-Host $_ }
 
-	& $linker $linker_args
+	$linking_time = Measure-Command { & $linker $linker_args }
 	# & $radlink $linker_args
+	write-host "Linking took $($linking_time.TotalMilliseconds)ms"
 	write-host
 }
 
