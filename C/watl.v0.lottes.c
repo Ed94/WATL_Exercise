@@ -28,6 +28,9 @@ https://youtu.be/RrL7121MOeA
 #pragma clang diagnostic ignored "-Wdeclaration-after-statement"
 #pragma clang diagnostic ignored "-Wunsafe-buffer-usage"
 #pragma clang diagnostic ignored "-Wc++-keyword"
+#pragma clang diagnostic ignored "-Wimplicit-function-declaration"
+#pragma clang diagnostic ignored "-Wcast-align"
+#pragma clang diagnostic ignored "-Wunused-parameter"
 
 #pragma region Header
 
@@ -81,6 +84,15 @@ typedef float  def_tset(F4);
 typedef double def_tset(F8);
 typedef float  V4_F4 __attribute__((vector_size(16))); typedef def_ptr_set(V4_F4);
 enum { false = 0, true  = 1, true_overflow, };
+
+#define u1_r(value) cast(U1_R, value)
+#define u2_r(value) cast(U2_R, value)
+#define u4_r(value) cast(U4_R, value)
+#define u8_r(value) cast(U8_R, value)
+#define u1_v(value) cast(U1_V, value)
+#define u2_v(value) cast(U2_V, value)
+#define u4_v(value) cast(U4_V, value)
+#define u8_v(value) cast(U8_V, value)
 
 #define u1_(value) cast(U1, value)
 #define u2_(value) cast(U2, value)
@@ -759,7 +771,33 @@ Str8 watl_dump_listing(AllocatorInfo buffer, Slice_WATL_Line lines);
 
 #pragma region Implementation
 
-
+#pragma region Memory Operations
+void* __cdecl memcpy (void* _Dst, void const* _Src, U8 _Size);
+void* __cdecl memmove(void* _Dst, void const* _Src, U8 _Size);
+void* __cdecl memset (void* _Dst, int         _Val, U8 _Size);
+inline
+U8 align_pow2(U8 x, U8 b) {
+    assert(b != 0);
+    assert((b & (b - 1)) == 0);  // Check power of 2
+    return ((x + b - 1) & (~(b - 1)));
+}
+U8 memory_copy(U8_R dest, U8_R src, U8 len) __asm__("memcpy");
+U8 memory_copy_overlapping(U8_R dest, U8_R src, U8 len) __asm__("memmove");
+inline
+B4 memory_zero(U8_R dest, U8 length) {
+	if (dest == nullptr) return false;
+	memset((unsigned char*)dest, 0, length);
+	return true;
+}
+inline void slice__zero(Slice_B1 mem, U8 typewidth) { slice_assert(mem); memory_zero( u8_r(mem.ptr), mem.len); }
+inline
+void slice__copy(Slice_B1 dest, U8 dest_typewidth, Slice_B1 src, U8 src_typewidth) {
+	assert(dest.len >= src.len);
+	slice_assert(dest);
+	slice_assert(src);
+	memory_copy(u8_r(dest.ptr), u8_r(src.ptr), src.len);
+}
+#pragma endregion Memory Operations
 
 #pragma endrgion Implementation
 
