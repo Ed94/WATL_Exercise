@@ -1,18 +1,19 @@
 $misc = Join-Path $PSScriptRoot 'helpers/misc.psm1'
 import-module $misc
 
-$devshell  = join-path $PSScriptRoot 'helpers/devshell.ps1'
+# This script now uses the LLVM toolchain (clang-cl, lld-link).
+# Ensure these tools are available in your PATH.
+# The original call to the MSVC devshell has been removed.
+# & (join-path $PSScriptRoot 'helpers/devshell.ps1') -arch amd64
+
 $path_root = Get-ScriptRepoRoot
 
 $path_root      = split-path -Path $PSScriptRoot -Parent
 $path_toolchain = join-path $path_root      'toolchain'
 $path_rad       = join-path $path_toolchain 'rad'
 
-if ($IsWindows) {
-	& $devshell -arch amd64
-}
-
 # https://learn.microsoft.com/en-us/cpp/build/reference/compiler-options-listed-by-category?view=msvc-170
+# Most cl.exe flags are compatible with clang-cl.exe
 $flag_all_c                        = '/TC'
 $flag_c11                          = '/std:c11'
 $flag_c23                          = '/std:c23'
@@ -42,8 +43,8 @@ $flag_link_win_machine_64          = '/MACHINE:X64'
 $flag_link_win_path_output         = '/OUT:'
 $flag_link_win_rt_dll              = '/MD'
 $flag_link_win_rt_dll_debug        = '/MDd'
-$flag_link_win_rt_static           = '/MT:STATIC'
-$flag_link_win_rt_static_debug     = '/MTd:STATIC'
+$flag_link_win_rt_static           = '/MT'
+$flag_link_win_rt_static_debug     = '/MTd'
 $flag_link_win_subsystem_console   = '/SUBSYSTEM:CONSOLE'
 $flag_link_win_subsystem_windows   = '/SUBSYSTEM:WINDOWS'
 $flag_no_optimization              = '/Od'
@@ -68,9 +69,9 @@ $flag_wall                         = '/Wall'
 $flag_warnings_as_errors           = '/WX'
 $flag_lib_list                     = '/LIST'
  
-$archiver = 'lib'
-$compiler = 'cl'
-$linker   = 'link'
+$archiver = 'llvm-lib'
+$compiler = 'clang-cl'
+$linker   = 'lld-link'
 $radbin   = join-path $path_rad 'radbin.exe'
 $radlink  = join-path $path_rad 'radlink.exe'
 
@@ -81,7 +82,7 @@ if ( -not(test-path -Path $path_build) ) {
 
 push-location $path_build
 
-write-host "Compiling"
+write-host "Compiling with clang-cl"
 
 $compiler_args = @()
 $compiler_args += $flag_nologo
@@ -115,21 +116,22 @@ $compiler_args += $flag_full_src_path
 # $compiler_args += $flag_asm_listing_file
 
 # $compiler_args += $flag_optimize_speed_max
-$compiler_args += $flag_optimize_fast
+# $compiler_args += $flag_optimize_fast
 # $compiler_args += $flag_optimize_size
 # $compiler_args += $flag_optimize_intrinsics
-# $compiler_args += $flag_no_optimization
+$compiler_args += $flag_no_optimization
 
 # Debug setup
 $compiler_args += ($flag_define + 'BUILD_DEBUG')
 $compiler_args += $flag_debug
 $compiler_args += ( $flag_path_debug + $path_build + '\' )
-$compiler_args += $flag_link_win_rt_static
+# Use the static, multithreaded, debug runtime library
+$compiler_args += $flag_link_win_rt_static_debug
 
 # Include setup
 $compiler_args += ($flag_include + $path_root)
 
-$unit_name   = "watl.v0.msvc"
+$unit_name   = "watl.v0.lottes"
 
 # Specify unit to compile
 $unit           = join-path $path_root "C\$unit_name.c"
@@ -151,7 +153,7 @@ $rdi         = join-path $path_build "$unit_name.rdi"
 $rdi_listing = join-path $path_build "$unit_name.rdi.list"
 
 if ($true) {
-	write-host "Linking"
+	write-host "Linking with lld-link"
 
 	$linker_args = @()
 	$linker_args += $flag_nologo
@@ -162,8 +164,12 @@ if ($true) {
 	$linker_args += "$flag_link_win_debug"
 	$linker_args += $flag_link_win_pdb + $pdb
 	$linker_args += $flag_link_mapfile + $map
+    $linker_args += $flag_link_win_subsystem_console
 
 	$linker_args += $object
+    
+    # Add necessary libraries for a basic Windows application
+    $linker_args += "kernel32.lib", "user32.lib", "gdi32.lib"
 
 	# Diagnoistc print for the args
 	$linker_args | ForEach-Object { Write-Host $_ }
