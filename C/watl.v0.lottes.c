@@ -26,6 +26,7 @@ https://youtu.be/RrL7121MOeA
 #pragma clang diagnostic ignored "-Wc23-extensions"
 #pragma clang diagnostic ignored "-Wunused-macros"
 #pragma clang diagnostic ignored "-Wdeclaration-after-statement"
+#pragma clang diagnostic ignored "-Wunsafe-buffer-usage"
 
 #pragma region Header
 
@@ -74,7 +75,7 @@ https://youtu.be/RrL7121MOeA
 
 typedef __UINT8_TYPE__  def_tset(U1); typedef __UINT16_TYPE__ def_tset(U2); typedef __UINT32_TYPE__ def_tset(U4); typedef __UINT64_TYPE__ def_tset(U8);
 typedef __INT8_TYPE__   def_tset(S1); typedef __INT16_TYPE__  def_tset(S2); typedef __INT32_TYPE__  def_tset(S4); typedef __INT64_TYPE__  def_tset(S8);
-typedef unsigned char   B1; typedef __UINT16_TYPE__ B2; typedef __UINT32_TYPE__ B4;
+typedef unsigned char   def_tset(B1); typedef __UINT16_TYPE__ def_tset(B2); typedef __UINT32_TYPE__ def_tset(B4);
 typedef float  def_tset(F4); 
 typedef double def_tset(F8);
 typedef float  V4_F4 __attribute__((vector_size(16)));
@@ -259,7 +260,7 @@ typedef def_enum(U4, AllocatorQueryFlags) {
 typedef struct AllocatorProc_In  AllocatorProc_In;
 typedef struct AllocatorProc_Out AllocatorProc_Out;
 typedef struct AllocatorSP       AllocatorSP;
-typedef void def_proc(AllocatorProc) (AllocatorProc_In In, AllocatorProc_Out* Out);
+typedef void def_proc(AllocatorProc) (AllocatorProc_In In, U8 Out);
 struct AllocatorSP {
 	U8 type_sig;
 	S8 slot;
@@ -479,7 +480,7 @@ end:
 #pragma region Key Table 1-Layer Linear (KT1L)
 #define def_KT1L_Slot(type)        \
 def_struct(tmpl(KT1L_Slot,type)) { \
-	U64  key;   \
+	U8   key;   \
 	type value; \
 }
 #define def_KT1L(type)             \
@@ -491,7 +492,7 @@ typedef def_struct(KT1L_Meta) {
 	U8 slot_size;
 	U8 kt_value_offset;
 	U8 type_width;
-	Str8  type_name;
+	Str8 type_name;
 };
 void kt1l__populate_slice_a2(KT1L_Byte* kt, AllocatorInfo backing, KT1L_Meta m, Slice_Mem values, U8 num_values );
 #define kt1l_populate_slice_a2(type, kt, ainfo, values) kt1l__populate_slice_a2(  \
@@ -510,10 +511,10 @@ void kt1l__populate_slice_a2(KT1L_Byte* kt, AllocatorInfo backing, KT1L_Meta m, 
 #pragma region Key Table 1-Layer Chained-Chunked-Cells (KT1CX)
 #define def_KT1CX_Slot(type)        \
 def_struct(tmpl(KT1CX_Slot,type)) { \
-	type value;    \
-	U64  key;      \
-	B32  occupied; \
-	byte_pad(4);   \
+	type value;   \
+	U8  key;      \
+	B4  occupied; \
+	A4_B1 _PAD_;  \
 }
 #define def_KT1CX_Cell(type, depth)    \
 def_struct(tmpl(KT1CX_Cell,type)) {    \
@@ -571,8 +572,97 @@ U8   kt1cx_set    (KT1CX_Byte kt,  U8 key, Slice_Mem value, AllocatorInfo backin
 	slice_assert(kt.cell_pool); \
 	slice_assert(kt.table);     \
 } while(0)
-#define kt1cx_byte(kt) (KT1CX_Byte){slice_byte(kt.cell_pool), { cast(Byte*, kt.table.ptr), kt.table.len } }
+#define kt1cx_byte(kt) (KT1CX_Byte){slice_byte(kt.cell_pool), { cast(U8, kt.table.ptr), kt.table.len } }
 #pragma endregion KT1CX
+
+#pragma region String Operations
+finline B4 char_is_upper(U8 c) { return('A' <= c && c <= 'Z'); }
+finline U8 char_to_lower(U8 c) { if (char_is_upper(c)) { c += ('a' - 'A'); } return(c); }
+inline U8 integer_symbols(U8 value) {
+	local_persist U1 lookup_table[16] = { '0','1','2','3','4','5','6','7','8','9','A','B','C','D','E','F', }; return lookup_table[cast(U1, value)]; 
+}
+
+char* str8_to_cstr_capped(Str8 content, Slice_Mem mem);
+Str8  str8_from_u32(AllocatorInfo ainfo, U4 num, U4 radix, U8 min_digits, U8 digit_group_separator);
+
+typedef def_farray(Str8, 2);
+typedef def_Slice(A2_Str8);
+typedef def_KT1L_Slot(Str8);
+typedef def_KT1L(Str8);
+
+Str8 str8__fmt_backed(AllocatorInfo tbl_backing, AllocatorInfo buf_backing, Str8 fmt_template, Slice_A2_Str8* entries);
+#define str8_fmt_backed(tbl_backing, buf_backing, fmt_template, ...) \
+str8__fmt_backed(tbl_backing, buf_backing, lit(fmt_template), slice_arg_from_array(A2_Str8, __VA_ARGS__))
+
+Str8 str8__fmt(Str8 fmt_template, Slice_A2_Str8* entries);
+#define str8_fmt(fmt_template, ...) str8__fmt(lit(fmt_template), slice_arg_from_array(A2_Str8, __VA_ARGS__))
+
+#define Str8Cache_CELL_DEPTH 4
+
+typedef def_KT1CX_Slot(Str8);
+typedef def_KT1CX_Cell(Str8, Str8Cache_CELL_DEPTH);
+typedef def_Slice(KT1CX_Cell_Str8);
+typedef def_KT1CX(Str8);
+typedef def_struct(Str8Cache) {
+	AllocatorInfo str_reserve;
+	AllocatorInfo cell_reserve;
+	AllocatorInfo tbl_backing;
+	KT1CX_Str8    kt;
+};
+
+typedef def_struct(Opts_str8cache_init) {
+	AllocatorInfo str_reserve;
+	AllocatorInfo cell_reserve;
+	AllocatorInfo tbl_backing;
+	U8 cell_pool_size;
+	U8 table_size;
+};
+void      str8cache__init(Str8Cache* cache, Opts_str8cache_init* opts);
+Str8Cache str8cache__make(                  Opts_str8cache_init* opts);
+
+#define str8cache_init(cache, ...) str8cache__init(cache, opt_args(Opts_str8cache_init, __VA_ARGS__))
+#define str8cache_make(...)        str8cache__make(       opt_args(Opts_str8cache_init, __VA_ARGS__))
+
+void  str8cache_clear(KT1CX_Str8 kt);
+U8 str8cache_get(KT1CX_Str8 kt, U8 key);
+U8 str8cache_set(KT1CX_Str8 kt, U8 key, Str8 value, AllocatorInfo str_reserve, AllocatorInfo backing_cells);
+
+Str8 cache_str8(Str8Cache* cache, Str8 str);
+
+typedef def_struct(Str8Gen) {
+	AllocatorInfo backing;
+	U8 ptr;
+	U8 len;
+	U8 cap;
+};
+void    str8gen_init(Str8Gen* gen, AllocatorInfo backing);
+Str8Gen str8gen_make(              AllocatorInfo backing);
+
+#define str8gen_slice_mem(gen) (Slice_mem){ cast(U8, (gen).ptr), (gen).cap }
+
+finline Str8 str8_from_str8gen(Str8Gen gen) { return (Str8){ cast(UTF8*, gen.ptr), gen.len}; }
+
+void str8gen_append_str8(Str8Gen* gen, Str8 str);
+void str8gen__append_fmt(Str8Gen* gen, Str8 fmt_template, Slice_A2_Str8* tokens);
+
+#define str8gen_append_fmt(gen, fmt_template, ...) str8gen__append_fmt(gen, lit(fmt_template), slice_arg_from_array(A2_Str8, __VA_ARGS__))
+#pragma endregion String Operations
+
+#pragma region File System
+typedef def_struct(FileOpInfo) {
+	Slice_Mem content;
+};
+typedef def_struct(Opts_read_file_contents) {
+	AllocatorInfo backing;
+	B4            zero_backing;
+	A4_B1 _PAD_;
+};
+void api_file_read_contents(FileOpInfo* result, Str8 path, Opts_read_file_contents opts);
+void file_write_str8       (Str8 path, Str8 content);
+
+FileOpInfo file__read_contents(Str8 path, Opts_read_file_contents* opts);
+#define file_read_contents(path, ...) file__read_contents(path, &(Opts_read_file_contents){__VA_ARGS__})
+#pragma endregion File System
 
 #pragma endregion Header
 
