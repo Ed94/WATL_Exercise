@@ -1366,23 +1366,24 @@ void arena_allocator_proc(AllocatorProc_In in, AllocatorProc_Out* out)
 }
 #pragma endregion Arena
 
+// Modern C+
 #pragma region Key Table 1-Layer Linear (KT1L)
-void kt1l__populate_slice_a2(KT1L_Byte* kt, AllocatorInfo backing, KT1L_Meta m, Slice_Byte values, SSIZE num_values ) {
+void kt1l__populate_slice_a2(KT1L_Byte*restrict kt, AllocatorInfo backing, KT1L_Meta m, Slice_Byte values, SSIZE num_values ) {
 	assert(kt != nullptr);
 	if (num_values == 0) { return; }
 	* kt = alloc_slice(backing, Byte, m.slot_size * num_values );
 	slice_assert(* kt);
 	for (span_iter(SSIZE, iter, 0, <, num_values)) {
-		SSIZE      slot_offset = iter.cursor * m.slot_size;                         // slot id
-		Byte*      slot_cursor = & kt->ptr[slot_offset];                            // slots[id]            type: KT1L_<Type>
-		U64*       slot_key    = (U64*)slot_cursor;                                 // slots[id].key        type: U64
-		Slice_Byte slot_value  = { slot_cursor + m.kt_value_offset, m.type_width }; // slots[id].value      type: <Type>
-		SSIZE      a2_offset   = iter.cursor * m.type_width * 2;                    // a2 entry id
-		Byte*      a2_cursor   = & values.ptr[a2_offset];                           // a2_entries[id]       type: A2_<Type>
-		Slice_Byte a2_key      = * cast(Slice_Byte*, a2_cursor);                    // a2_entries[id].key   type: <Type>
-		Slice_Byte a2_value    = { a2_cursor + m.type_width, m.type_width };        // a2_entries[id].value type: <Type>
-		slice_copy(slot_value, a2_value);                                           // slots[id].value = a2_entries[id].value
-		* slot_key = 0; hash64_djb8(slot_key,  a2_key);                             // slots[id].key   = hash64_djb8(a2_entries[id].key)
+		SSIZE         slot_offset = iter.cursor * m.slot_size;                         // slot id
+		Byte*restrict slot_cursor = & kt->ptr[slot_offset];                            // slots[id]            type: KT1L_<Type>
+		U64*restrict  slot_key    = (U64*restrict)slot_cursor;                         // slots[id].key        type: U64
+		Slice_Byte    slot_value  = { slot_cursor + m.kt_value_offset, m.type_width }; // slots[id].value      type: <Type>
+		SSIZE         a2_offset   = iter.cursor * m.type_width * 2;                    // a2 entry id
+		Byte*restrict a2_cursor   = & values.ptr[a2_offset];                           // a2_entries[id]       type: A2_<Type>
+		Slice_Byte    a2_key      = * cast(Slice_Byte*restrict, a2_cursor);            // a2_entries[id].key   type: <Type>
+		Slice_Byte    a2_value    = { a2_cursor + m.type_width, m.type_width };        // a2_entries[id].value type: <Type>
+		slice_copy(slot_value, a2_value);                                              // slots[id].value = a2_entries[id].value
+		* slot_key = 0; hash64_djb8(slot_key,  a2_key);                                // slots[id].key   = hash64_djb8(a2_entries[id].key)
 	}
 	kt->len = num_values;
 }

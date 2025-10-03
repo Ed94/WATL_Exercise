@@ -33,6 +33,8 @@ https://youtu.be/RrL7121MOeA
 #pragma clang diagnostic ignored "-Wunused-parameter"
 #pragma clang diagnostic ignored "-Wswitch-default"
 #pragma clang diagnostic ignored "-Wmissing-field-initializers"
+#pragma clang diagnostic ignored "-Wgnu-zero-variadic-macro-arguments"
+#pragma clang diagnostic ignored "-Wpointer-sign"
 
 #pragma region Header
 
@@ -230,6 +232,7 @@ finline void BarW(void){__builtin_ia32_sfence();}        // Write    Barrier
 #define sll_queue_push_n(f, l, n, next) sll_queue_push_nz(0, f, l, n, next)
 
 typedef def_struct(Slice_Mem) { U8 ptr; U8 len; };
+#define slice_mem(ptr, len) (Slice_Mem){ptr, len}
 
 #define def_Slice(type)           def_struct(tmpl(Slice,type)) { type*R_ ptr; U8 len; }; typedef def_ptr_set(tmpl(Slice,type))
 #define slice_assert(slice)       do { assert((slice).ptr != 0); assert((slice).len > 0); } while(0)
@@ -251,6 +254,21 @@ void slice__zero(Slice_B1 mem, U8 typewidth);
 
 #define slice_iter(container, iter)     typeof((container).ptr) iter = (container).ptr; iter != slice_end(container); ++ iter
 #define slice_arg_from_array(type, ...) & (tmpl(Slice,type)) { .ptr = farray_init(type, __VA_ARGS__), .len = farray_len( farray_init(type, __VA_ARGS__)) }
+
+#define span_iter(type, iter, m_begin, op, m_end)  \
+	tmpl(Iter_Span,type) iter = { \
+		.r = {(m_begin), (m_end)},   \
+		.cursor = (m_begin) };       \
+	iter.cursor op iter.r.end;     \
+	++ iter.cursor
+
+#define def_span(type)                                                \
+	        def_struct(tmpl(     Span,type)) { type begin; type end; }; \
+	typedef def_struct(tmpl(Iter_Span,type)) { tmpl(Span,type) r; type cursor; }
+
+typedef def_span(B1);
+typedef def_span(U4);
+typedef def_span(U8);
 #pragma endregion Memory
 
 #pragma region Math
@@ -596,7 +614,7 @@ typedef def_struct(KT1CX_Info) {
 	AllocatorInfo backing_table;
 	AllocatorInfo backing_cells;
 };
-void kt1cx_init   (KT1CX_Info info, KT1CX_InfoMeta m, KT1CX_Byte* result);
+void kt1cx_init   (KT1CX_Info info, KT1CX_InfoMeta m, KT1CX_Byte*R_ result);
 void kt1cx_clear  (KT1CX_Byte kt,  KT1CX_ByteMeta meta);
 U8   kt1cx_slot_id(KT1CX_Byte kt,  U8 key, KT1CX_ByteMeta meta);
 U8   kt1cx_get    (KT1CX_Byte kt,  U8 key, KT1CX_ByteMeta meta);
@@ -1435,6 +1453,138 @@ void arena_allocator_proc(AllocatorProc_In in, AllocatorProc_Out* out)
 	}
 }
 #pragma endregion Arena
+
+// C--
+#pragma region Key Table 1-Layer Linear (KT1L)
+void kt1l__populate_slice_a2(KT1L_Byte*R_ kt, AllocatorInfo backing, KT1L_Meta m, Slice_Mem values, U8 num_values ) {
+	assert(kt != nullptr);
+	if (num_values == 0) { return; }
+	kt[0] = mem_alloc(backing, m.slot_size * num_values ); slice_assert(* kt);
+	U8 iter = 0;
+	loop: {
+		U8 slot_offset = iter        * m.slot_size;       // slot id
+		U8 slot_cursor = kt->ptr     + slot_offset;       // slots[id]            type: KT1L_<Type>
+		U8 slot_value  = slot_cursor + m.kt_value_offset; // slots[id].value      type: <Type>
+		U8 a2_offset   = iter        * m.type_width * 2;  // a2 entry id
+		U8 a2_cursor   = values.ptr  + a2_offset;         // a2_entries[id]       type: A2_<Type>
+		U8 a2_value    = a2_cursor   + m.type_width;      // a2_entries[id].value type: <Type>
+		memory_copy(slot_value, a2_value, m.type_width);  // slots[id].value = a2_entries[id].value
+		u1_r(slot_cursor)[0] = 0; 
+		hash64_djb8(u8_r(slot_cursor), slice_mem(a2_cursor, m.type_width)); // slots[id].key   = hash64_djb8(a2_entries[id].key)
+		++ iter;
+		if (iter < num_values) goto loop;
+	}
+	kt->len = num_values;
+}
+#pragma endregion KT1L
+
+#pragma region Key Table 1-Layer Chained-Chunked_Cells (KT1CX)
+inline
+void kt1cx_init(KT1CX_Info info, KT1CX_InfoMeta m, KT1CX_Byte* result) {
+	assert(result                  != nullptr);
+	assert(info.backing_cells.proc != nullptr);
+	assert(info.backing_table.proc != nullptr);
+	assert(m.cell_depth     >  0);
+	assert(m.cell_pool_size >= kilo(4));
+	assert(m.table_size     >= kilo(4));
+	assert(m.type_width     >  0);
+	result->table     = mem_alloc(info.backing_table, m.table_size * m.cell_size);      slice_assert(result->table);
+	result->cell_pool = mem_alloc(info.backing_cells, m.cell_size  * m.cell_pool_size); slice_assert(result->cell_pool);
+	result->table.len = m.table_size; // Setting to the table number of elements instead of byte length.
+}
+void kt1cx_clear(KT1CX_Byte kt, KT1CX_ByteMeta m) {
+	U8 cell_cursor = kt.table.ptr;
+	U8 table_len   = kt.table.len * m.cell_size;
+	for (; cell_cursor != slice_end(kt.table); cell_cursor += m.cell_size ) // for cell in kt.table.cells
+	{
+		Slice_Mem slots       = {cell_cursor, m.cell_depth * m.slot_size }; // slots = cell.slots
+		U8        slot_cursor = slots.ptr;
+		for (; slot_cursor < slice_end(slots); slot_cursor += m.slot_size) {
+		process_slots:
+			Slice_Mem slot = {slot_cursor, m.slot_size}; // slot = slots[id]
+			memory_zero(slot.ptr, slot.len);             // clear(slot)
+		}
+		U8 next = slot_cursor + m.cell_next_offset; // next = slots + next_cell_offset
+		if (next != null) {
+			slots.ptr   = next; // slots = next
+			slot_cursor = next;
+			goto process_slots;
+		}
+	}
+}
+inline
+U8 kt1cx_slot_id(KT1CX_Byte kt, U8 key, KT1CX_ByteMeta m) {
+	U8 hash_index = key % kt.table.len;
+	return hash_index;
+}
+U8 kt1cx_get(KT1CX_Byte kt, U8 key, KT1CX_ByteMeta m) {
+	U8 hash_index  = kt1cx_slot_id(kt, key, m);
+	U8 cell_offset = hash_index * m.cell_size;
+	U8 cell_cursor = kt.table.ptr + cell_offset; // KT1CX_Cell_<Type> cell = kt.table[hash_index]
+	{
+		Slice_Mem slots       = {cell_cursor, m.cell_depth * m.slot_size}; // KT1CX_Slot_<Type>[kt.cell_depth] slots = cell.slots
+		U8        slot_cursor = slots.ptr;
+		for (; slot_cursor != slice_end(slots); slot_cursor += m.slot_size) {
+		process_slots:
+			KT1CX_Byte_Slot* slot = cast(KT1CX_Byte_Slot*, slot_cursor + m.slot_key_offset); // slot = slots[id]     KT1CX_Slot_<Type>
+			if (slot->occupied && slot->key == key) {
+				return slot_cursor;
+			}
+		}
+		U8 cell_next = cell_cursor + m.cell_next_offset; // cell.next
+		if (cell_next != null) {
+			slots.ptr   = cell_next; // slots = cell_next
+			slot_cursor = cell_next;
+			cell_cursor = cell_next; // cell = cell_next
+			goto process_slots;
+		}
+		else {
+			return null;
+		}
+	}
+}
+inline
+U8 kt1cx_set(KT1CX_Byte kt, U8 key, Slice_Mem value, AllocatorInfo backing_cells, KT1CX_ByteMeta m) {
+	U8 hash_index  = kt1cx_slot_id(kt, key, m);
+	U8 cell_offset = hash_index * m.cell_size;
+	U8 cell_cursor = kt.table.ptr + cell_offset; // KT1CX_Cell_<Type> cell = kt.table[hash_index]
+	{
+		Slice_Mem slots       = {cell_cursor, m.cell_depth * m.slot_size}; // cell.slots
+		U8        slot_cursor = slots.ptr;
+		for (; slot_cursor != slice_end(slots); slot_cursor += m.slot_size) {
+		process_slots:
+			KT1CX_Byte_Slot_R slot = cast(KT1CX_Byte_Slot_R, slot_cursor + m.slot_key_offset);
+			if (slot->occupied == false) {
+				slot->occupied = true;
+				slot->key      = key;
+				return slot_cursor;
+			}
+			else if (slot->key == key) {
+				return slot_cursor;
+			}
+		}
+		KT1CX_Byte_Cell curr_cell = { cell_cursor + m.cell_next_offset }; // curr_cell = cell
+		if ( curr_cell.next != null) {
+			slots.ptr   = curr_cell.next;
+			slot_cursor = curr_cell.next;
+			cell_cursor = curr_cell.next;
+			goto process_slots;
+		}
+		else {
+			Slice_Mem new_cell = mem_alloc(backing_cells, m.cell_size);
+			curr_cell.next     = new_cell.ptr;
+			KT1CX_Byte_Slot_R slot = cast(KT1CX_Byte_Slot_R, new_cell.ptr + m.slot_key_offset);
+			slot->occupied = true;
+			slot->key      = key;
+			return new_cell.ptr;
+		}
+	}
+	assert_msg(false, "impossible path");
+	return null;
+}
+#pragma endregion Key Table
+
+
 
 #pragma endregion Implementation
 
