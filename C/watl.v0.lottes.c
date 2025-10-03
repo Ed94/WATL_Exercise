@@ -25,6 +25,7 @@ https://youtu.be/RrL7121MOeA
 #pragma clang diagnostic ignored "-Wpre-c11-compat"
 #pragma clang diagnostic ignored "-Wc23-extensions"
 #pragma clang diagnostic ignored "-Wunused-macros"
+#pragma clang diagnostic ignored "-Wdeclaration-after-statement"
 
 #pragma region Header
 
@@ -48,8 +49,8 @@ https://youtu.be/RrL7121MOeA
 #define expect_(x, y) __builtin_expect(x, y)                       // so compiler knows the common path
 #define finline       static inline __attribute__((always_inline)) // force inline
 #define noinline      static        __attribute__((noinline))      // force no inline [used in thread api]
-#define r_            __restrict                                   // pointers are either restricted or volatile and nothing else 
-#define v_            volatile                                     // pointers are either restricted or volatile and nothing else
+#define R_            __restrict                                   // pointers are either restricted or volatile and nothing else 
+#define V_            volatile                                     // pointers are either restricted or volatile and nothing else
 // #define W_            __attribute((__stdcall__)) __attribute__((__force_align_arg_pointer__))
 
 #define glue_impl(A, B)    A ## B
@@ -66,22 +67,29 @@ https://youtu.be/RrL7121MOeA
 #define typeof_ptr(ptr)    typeof(ptr[0])
 #define typeof_same(a, b)  _Generic((a), typeof((b)): 1, default: 0)
 
-typedef __UINT8_TYPE__  U1;
-typedef __INT8_TYPE__   S1;
-typedef __UINT16_TYPE__ U2;
-typedef __INT16_TYPE__  S2;
-typedef __UINT32_TYPE__ U4;
-typedef __INT32_TYPE__  S4;
-typedef __UINT64_TYPE__ U8;
-typedef __INT64_TYPE__  S8;
-typedef unsigned char   B1;
-typedef __UINT16_TYPE__ B2;
-typedef __UINT32_TYPE__ B4;
-enum {
-	false = 0,
-	true  = 1,
-	true_overflow,
-};
+#define def_R_(type)      type* restrict PR_ ## type
+#define def_V_(type)      type* volatile PV_ ## type
+#define def_ptr_set(type) def_R_(type); typedef def_V_(type)
+#define def_tset(type) type; typedef def_ptr_set(type)
+
+typedef __UINT8_TYPE__  def_tset(U1); typedef __UINT16_TYPE__ def_tset(U2); typedef __UINT32_TYPE__ def_tset(U4); typedef __UINT64_TYPE__ def_tset(U8);
+typedef __INT8_TYPE__   def_tset(S1); typedef __INT16_TYPE__  def_tset(S2); typedef __INT32_TYPE__  def_tset(S4); typedef __INT64_TYPE__  def_tset(S8);
+typedef unsigned char   B1; typedef __UINT16_TYPE__ B2; typedef __UINT32_TYPE__ B4;
+typedef float  def_tset(F4); 
+typedef double def_tset(F8);
+typedef float  V4_F4 __attribute__((vector_size(16)));
+enum { false = 0, true  = 1, true_overflow, };
+
+#define u1_(value) cast(U1, value)
+#define u2_(value) cast(U2, value)
+#define u4_(value) cast(U4, value)
+#define u8_(value) cast(U8, value)
+#define s1_(value) cast(S1, value)
+#define s2_(value) cast(S2, value)
+#define s4_(value) cast(S4, value)
+#define s8_(value) cast(S8, value)
+#define f4_(value) cast(F4, value)
+#define f8_(value) cast(F8, value)
 
 #define farray_len(array)                   (SSIZE)sizeof(array) / size_of( typeof((array)[0]))
 #define farray_init(type, ...)              (type[]){__VA_ARGS__}
@@ -106,12 +114,7 @@ enum {
 #define giga(n)                             (cast(U8, n) << 30)
 #define tera(n)                             (cast(U8, n) << 40)
 
-// Back to lottes..
-
-#define s1_(value) cast(S1, value)
-#define s2_(value) cast(S2, value)
-#define s4_(value) cast(S4, value)
-#define s8_(value) cast(S8, value)
+// Signed stuff (still diff flavor from Lottes)
 
 #define sop_1(op, a, b) cast(U1, s1_(a) op s1_(b))
 #define sop_2(op, a, b) cast(U2, s2_(a) op s2_(b))
@@ -120,15 +123,18 @@ enum {
 
 #define def_signed_op(id, op, width) finline U ## width id ## _s ## width(U ## width a, U ## width b) {return sop_ ## width(op, a, b); }
 #define def_signed_ops(id, op)       def_signed_op(id, op, 1) def_signed_op(id, op, 2) def_signed_op(id, op, 4) def_signed_op(id, op, 8)
-def_signed_ops(add, +) def_signed_ops(sub, -)
-def_signed_ops(mut, *) def_signed_ops(div, /)
-def_signed_ops(gt, >)  def_signed_ops(lt, <)
-def_signed_ops(ge, >=) def_signed_ops(le, <=)
+def_signed_ops(add, +) def_signed_ops(sub, -) def_signed_ops(mut, *) def_signed_ops(div, /)
+def_signed_ops(gt,  >) def_signed_ops(lt,  <) def_signed_ops(ge, >=) def_signed_ops(le, <=)
 
 #define def_generic_sop(op, a, ...) _Generic((a), U1:  op ## _s1, U2: op ## _s2, U4: op ## _s4, U8: op ## _s8) (a, __VA_ARGS__)
-#define ge_s(a,b) def_generic_sop(ge, a, b)
-#define le_s(a,b) def_generic_sop(le, a, b)
-#pragma region DSL
+#define add_s(a,b) def_generic_sop(add,a,b)
+#define sub_s(a,b) def_generic_sop(sub,a,b)
+#define mut_s(a,b) def_generic_sop(mut,a,b)
+#define gt_s(a,b)  def_generic_sop(gt, a,b)
+#define lt_s(a,b)  def_generic_sop(lt, a,b)
+#define ge_s(a,b)  def_generic_sop(ge, a,b)
+#define le_s(a,b)  def_generic_sop(le, a,b)
+#pragma endregion DSL
 
 #pragma region Strings
 typedef unsigned char UTF8;
@@ -197,8 +203,6 @@ B4 mem_zero            (U8 dest, U8 length);
 
 typedef def_struct(Slice_Mem) { U8 ptr; U8 len; };
 
-// TODO(Ed): Not sure about these yet..
-#if 0
 #define def_Slice(type)           def_struct(tmpl(Slice,type)) { type* ptr; U8 len; }
 #define slice_assert(slice)       do { assert((slice).ptr != nullptr); assert((slice).len > 0); } while(0)
 #define slice_end(slice)          ((slice).ptr + (slice).len)
@@ -219,7 +223,6 @@ void slice__zero(Slice_B1 mem, U8 typewidth);
 
 #define slice_iter(container, iter)     typeof((container).ptr) iter = (container).ptr; iter != slice_end(container); ++ iter
 #define slice_arg_from_array(type, ...) & (tmpl(Slice,type)) { .ptr = farray_init(type, __VA_ARGS__), .len = farray_len( farray_init(type, __VA_ARGS__)) }
-#endif
 #pragma endregion Memory
 
 #pragma region Math
@@ -336,15 +339,16 @@ typedef def_struct(Opts_farena) {
 	U8   alignment;
 };
 typedef def_struct(FArena) {
-	void* start;
+	U8 start;
 	U8 capacity;
 	U8 used;
 };
+typedef def_ptr_set(FArena);
 FArena      farena_make  (Slice_Mem mem);
-void        farena_init  (FArena* arena, Slice_Mem byte);
-Slice_Mem   farena__push (FArena* arena, U8 amount, U8 type_width, Opts_farena* opts);
-void        farena_reset (FArena* arena);
-void        farena_rewind(FArena* arena, AllocatorSP save_point);
+void        farena_init  (FArena*R_ arena, Slice_Mem byte);
+Slice_Mem   farena__push (FArena*R_ arena, U8 amount, U8 type_width, Opts_farena* opts);
+void        farena_reset (FArena*R_ arena);
+void        farena_rewind(FArena*R_ arena, AllocatorSP save_point);
 AllocatorSP farena_save  (FArena  arena);
 
 void farena_allocator_proc(AllocatorProc_In in, AllocatorProc_Out* out);
@@ -357,6 +361,219 @@ cast(type*, farena__push(arena, size_of(type), 1, opt_args(Opts_farena_push, lit
 (Slice ## type){ farena__push(arena, size_of(type), amount, opt_args(Opts_farena_push, lit(stringify(type)), __VA_ARGS__)).ptr, amount }
 #pragma endregion FArena
 
+#pragma region OS
+typedef def_struct(OS_SystemInfo) {
+	U8 target_page_size;
+};
+typedef def_struct(Opts_vmem) {
+	U8    base_addr;
+	B4    no_large_pages;
+	A4_B1 _PAD_;
+};
+void os_init(void);
+OS_SystemInfo* os_system_info(void);
+
+inline B4 os__vmem_commit(U8 vm, U8 size, Opts_vmem* opts);
+inline U8 os__vmem_reserve(U8 size, Opts_vmem* opts);
+inline void  os_vmem_release(U8 vm, U8 size);
+
+#define os_vmem_reserve(size, ...)    os__vmem_reserve(size, opt_args(Opts_vmem, __VA_ARGS__))
+#define os_vmem_commit(vm, size, ...) os__vmem_commit(vm, size, opt_args(Opts_vmem, __VA_ARGS__))
+#pragma endregion OS
+
+#pragma region VArena (Virutal Address Space Arena)
+typedef Opts_farena Opts_varena;
+typedef def_enum(U4, VArenaFlags) {
+	VArenaFlag_NoLargePages = (1 << 0),
+};
+typedef def_struct(VArena) {
+	U8 reserve_start;
+	U8 reserve;
+	U8 commit_size;
+	U8 committed;
+	U8 commit_used;
+	VArenaFlags flags;
+	A4_B1 _PAD;
+};
+typedef def_struct(Opts_varena_make) {
+	U8 base_addr;
+	U8 reserve_size;
+	U8 commit_size;
+	VArenaFlags flags;
+	A4_B1 _PAD_;
+};
+VArena* varena__make(Opts_varena_make* opts);
+#define varena_make(...) varena__make(opt_args(Opts_varena_make, __VA_ARGS__))
+
+Slice_Mem   varena__push  (VArena* arena, U8 amount, U8 type_width, Opts_varena* opts);
+void        varena_release(VArena* arena);
+void        varena_rewind (VArena* arena, AllocatorSP save_point);
+void        varena_reset  (VArena* arena);
+Slice_Mem   varena__shrink(VArena* arena, Slice_Mem old_allocation, U8 requested_size, Opts_varena* opts);
+AllocatorSP varena_save   (VArena* arena);
+
+void varena_allocator_proc(AllocatorProc_In in, AllocatorProc_Out* out);
+#define ainfo_varena(varena) (AllocatorInfo) { .proc = & varena_allocator_proc, .data = varena }
+
+#define varena_push(arena, type, ...) \
+cast(type*, varena__push(arena, 1, size_of(type), opt_args(Opts_varena, lit(stringify(type)), __VA_ARGS__) ).ptr)
+
+#define varena_push_array(arena, type, amount, ...) \
+(tmpl(Slice,type)){ varena__push(arena, size_of(type), amount, opt_args(Opts_varena, lit(stringify(type)), __VA_ARGS__)).ptr, amount }
+#pragma endregion VArena
+
+#pragma region Arena (Casey-Ryan Composite Arenas)
+typedef Opts_varena Opts_arena;
+typedef def_enum(U4, ArenaFlags) {
+	ArenaFlag_NoLargePages = (1 << 0),
+	ArenaFlag_NoChain      = (1 << 1),
+};
+typedef def_struct(Arena) {
+	VArena*    backing;
+	Arena*     prev;
+	Arena*     current;
+	U8         base_pos;
+	U8         pos;
+	ArenaFlags flags;
+	A4_B1 _PAD_;
+};
+typedef Opts_varena_make Opts_arena_make;
+Arena*      arena__make  (Opts_arena_make* opts);
+Slice_Mem   arena__push  (Arena* arena, U8 amount, U8 type_width, Opts_arena* opts);
+void        arena_release(Arena* arena);
+void        arena_reset  (Arena* arena);
+void        arena_rewind (Arena* arena, AllocatorSP save_point);
+AllocatorSP arena_save   (Arena* arena);
+
+void arena_allocator_proc(AllocatorProc_In in, AllocatorProc_Out* out);
+#define ainfo_arena(arena) (AllocatorInfo){ .proc = & arena_allocator_proc, .data = arena }
+
+#define arena_make(...) arena__make(opt_args(Opts_arena_make, __VA_ARGS__))
+
+#define arena_push(arena, type, ...) \
+cast(type*, arena__push(arena, 1, size_of(type), opt_args(Opts_arena, lit(stringify(type)), __VA_ARGS__) ).ptr)
+
+#define arena_push_array(arena, type, amount, ...) \
+(tmpl(Slice,type)){ arena__push(arena, size_of(type), amount, opt_args(Opts_arena, lit(stringify(type)), __VA_ARGS__)).ptr, amount }
+#pragma endregion Arena
+
+#pragma region Hashing
+finline
+void hash64_djb8(PR_U8 hash, Slice_Mem bytes) {
+	U8 elem = bytes.ptr;
+	U8 curr = hash[0];
+loop:
+	hash[0] <<= 8;
+	hash[0]  += hash[0];
+	curr     += elem;
+	hash[0]   = curr;
+	if (elem != bytes.ptr + bytes.len) 
+	goto end;
+	++ elem;
+	goto loop;
+end:
+	return;
+}
+#pragma endregion Hashing
+
+#pragma region Key Table 1-Layer Linear (KT1L)
+#define def_KT1L_Slot(type)        \
+def_struct(tmpl(KT1L_Slot,type)) { \
+	U64  key;   \
+	type value; \
+}
+#define def_KT1L(type)             \
+	def_Slice(tmpl(KT1L_Slot,type)); \
+	typedef tmpl(Slice_KT1L_Slot,type) tmpl(KT1L,type)
+
+typedef Slice_Mem KT1L_Byte;
+typedef def_struct(KT1L_Meta) {
+	U8 slot_size;
+	U8 kt_value_offset;
+	U8 type_width;
+	Str8  type_name;
+};
+void kt1l__populate_slice_a2(KT1L_Byte* kt, AllocatorInfo backing, KT1L_Meta m, Slice_Mem values, U8 num_values );
+#define kt1l_populate_slice_a2(type, kt, ainfo, values) kt1l__populate_slice_a2(  \
+	cast(KT1L_Byte*, kt),                                        \
+	ainfo,                                                       \
+	(KT1L_Meta){                                                 \
+		.slot_size       = size_of(tmpl(KT1L_Slot,type)),          \
+		.kt_value_offset = offset_of(tmpl(KT1L_Slot,type), value), \
+		.type_width      = size_of(type),                          \
+		.type_name       = lit(stringify(type))                    \
+	},                                                           \
+	slice_byte(values), (values).len                             \
+)
+#pragma endregion KT1L
+
+#pragma region Key Table 1-Layer Chained-Chunked-Cells (KT1CX)
+#define def_KT1CX_Slot(type)        \
+def_struct(tmpl(KT1CX_Slot,type)) { \
+	type value;    \
+	U64  key;      \
+	B32  occupied; \
+	byte_pad(4);   \
+}
+#define def_KT1CX_Cell(type, depth)    \
+def_struct(tmpl(KT1CX_Cell,type)) {    \
+	tmpl(KT1CX_Slot,type)  slots[depth]; \
+	tmpl(KT1CX_Cell,type)* next;         \
+}
+#define def_KT1CX(type)                  \
+def_struct(tmpl(KT1CX,type)) {           \
+	tmpl(Slice_KT1CX_Cell,type) cell_pool; \
+	tmpl(Slice_KT1CX_Cell,type) table;     \
+}
+typedef def_struct(KT1CX_Byte_Slot) {
+	U8   key;
+	B4   occupied;
+	A4_B1 _PAD_;
+};
+typedef def_struct(KT1CX_Byte_Cell) {
+	U8 next;
+};
+typedef def_struct(KT1CX_Byte) {
+	Slice_Mem cell_pool;
+	Slice_Mem table;
+};
+typedef def_struct(KT1CX_ByteMeta) {
+	U8   slot_size;
+	U8   slot_key_offset;
+	U8   cell_next_offset;
+	U8   cell_depth;
+	U8   cell_size;
+	U8   type_width;
+	Str8 type_name;
+};
+typedef def_struct(KT1CX_InfoMeta) {
+	U8   cell_pool_size;
+	U8   table_size;
+	U8   slot_size;
+	U8   slot_key_offset;
+	U8   cell_next_offset;
+	U8   cell_depth;
+	U8   cell_size;
+	U8   type_width;
+	Str8 type_name;
+};
+typedef def_struct(KT1CX_Info) {
+	AllocatorInfo backing_table;
+	AllocatorInfo backing_cells;
+};
+void kt1cx_init   (KT1CX_Info info, KT1CX_InfoMeta m, KT1CX_Byte* result);
+void kt1cx_clear  (KT1CX_Byte kt,  KT1CX_ByteMeta meta);
+U8   kt1cx_slot_id(KT1CX_Byte kt,  U8 key, KT1CX_ByteMeta meta);
+U8   kt1cx_get    (KT1CX_Byte kt,  U8 key, KT1CX_ByteMeta meta);
+U8   kt1cx_set    (KT1CX_Byte kt,  U8 key, Slice_Mem value, AllocatorInfo backing_cells, KT1CX_ByteMeta meta);
+
+#define kt1cx_assert(kt) do {   \
+	slice_assert(kt.cell_pool); \
+	slice_assert(kt.table);     \
+} while(0)
+#define kt1cx_byte(kt) (KT1CX_Byte){slice_byte(kt.cell_pool), { cast(Byte*, kt.table.ptr), kt.table.len } }
+#pragma endregion KT1CX
+
 #pragma endregion Header
 
 #pragma region Implementation
@@ -366,6 +583,7 @@ int main(void)
 {
 	U8 a = 4;
 	U8 b = 2;
+	a = add_s(a, b);
 	U8 test = ge_s(a, b);
 	return 0;
 }

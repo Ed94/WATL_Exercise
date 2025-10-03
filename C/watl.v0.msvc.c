@@ -383,7 +383,7 @@ cast(type*, varena__push(arena, 1, size_of(type), opt_args(Opts_varena, lit(stri
 
 #define varena_push_array(arena, type, amount, ...) \
 (tmpl(Slice,type)){ varena__push(arena, size_of(type), amount, opt_args(Opts_varena, lit(stringify(type)), __VA_ARGS__)).ptr, amount }
-#pragma endregion VArnea
+#pragma endregion VArena
 
 #pragma region Arena (Casey-Ryan Composite Arenas)
 typedef Opts_varena Opts_arena;
