@@ -141,7 +141,9 @@ $compiler_args += $flag_compile, $unit
 $compiler_args | ForEach-Object { Write-Host $_ }
 
 # Compile the unit
-$compilation_time = Measure-Command { & $compiler $compiler_args }
+# $compilation_time = Measure-Command { 
+	& $compiler $compiler_args 
+# }
 write-host "Compilation took $($compilation_time.TotalMilliseconds)ms"
 write-host
 

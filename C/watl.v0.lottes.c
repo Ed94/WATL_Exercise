@@ -522,9 +522,11 @@ void hash64_djb8(U8_R hash, Slice_Mem bytes) {
 loop:
 	hash[0] <<= 8;
 	hash[0]  += hash[0];
-	hash[0]  += elem;
+	hash[0]  += u1_r(elem)[0];
+	if (elem != bytes.ptr + bytes.len) goto end;
 	++ elem;
-	if (elem != bytes.ptr + bytes.len) goto loop;
+	goto loop;
+end:
 	return;
 }
 #pragma endregion Hashing
@@ -624,13 +626,13 @@ U8   kt1cx_set    (KT1CX_Byte kt,  U8 key, Slice_Mem value, AllocatorInfo backin
 	slice_assert(kt.cell_pool); \
 	slice_assert(kt.table);     \
 } while(0)
-#define kt1cx_byte(kt) (KT1CX_Byte){slice_mem_s(kt.cell_pool), slice_mem_s(kt.table)}
+#define kt1cx_byte(kt) (KT1CX_Byte){slice_mem_s(kt.cell_pool), (Slice_Mem){u8_(kt.table.ptr), kt.table.len} }
 #pragma endregion KT1CX
 
 #pragma region String Operations
-finline B4 char_is_upper(U8 c) { return('A' <= c && c <= 'Z'); }
-finline U8 char_to_lower(U8 c) { if (char_is_upper(c)) { c += ('a' - 'A'); } return(c); }
-inline U8 integer_symbols(U8 value) {
+finline B4 char_is_upper(U1 c) { return('A' <= c && c <= 'Z'); }
+finline U1 char_to_lower(U1 c) { if (char_is_upper(c)) { c += ('a' - 'A'); } return(c); }
+inline U1 integer_symbols(U1 value) {
 	local_persist U1 lookup_table[16] = { '0','1','2','3','4','5','6','7','8','9','A','B','C','D','E','F', }; return lookup_table[cast(U1, value)]; 
 }
 
@@ -683,9 +685,9 @@ Str8 cache_str8(Str8Cache* cache, Str8 str);
 
 typedef def_struct(Str8Gen) {
 	AllocatorInfo backing;
-	UTF8* ptr;
-	U8    len;
-	U8    cap;
+	UTF8_R ptr;
+	U8     len;
+	U8     cap;
 };
 void    str8gen_init(Str8Gen_R gen, AllocatorInfo backing);
 Str8Gen str8gen_make(               AllocatorInfo backing);
@@ -1466,8 +1468,8 @@ void kt1l__populate_slice_a2(KT1L_Byte*R_ kt, AllocatorInfo backing, KT1L_Meta m
 		U8 a2_cursor   = values.ptr  + a2_offset;         // a2_entries[id]       type: A2_<Type>
 		U8 a2_value    = a2_cursor   + m.type_width;      // a2_entries[id].value type: <Type>
 		memory_copy(slot_value, a2_value, m.type_width);  // slots[id].value = a2_entries[id].value
-		u1_r(slot_cursor)[0] = 0; 
-		hash64_djb8(u8_r(slot_cursor), slice_mem(a2_cursor, m.type_width)); // slots[id].key   = hash64_djb8(a2_entries[id].key)
+		u8_r(slot_cursor)[0] = 0; 
+		hash64_djb8(u8_r(slot_cursor), cast(Slice_Mem*, a2_cursor)[0] ); // slots[id].key   = hash64_djb8(a2_entries[id].key)
 		++ iter;
 		if (iter < num_values) goto loop;
 	}
@@ -1545,6 +1547,7 @@ U8 kt1cx_set(KT1CX_Byte kt, U8 key, Slice_Mem value, AllocatorInfo backing_cells
 	U8 hash_index  = kt1cx_slot_id(kt, key, m);
 	U8 cell_offset = hash_index * m.cell_size;
 	U8 cell_cursor = kt.table.ptr + cell_offset; // KT1CX_Cell_<Type> cell = kt.table[hash_index]
+	// U8 cell_cursor = u1_rkt.table.ptr + cell_offset; // KT1CX_Cell_<Type> cell = kt.table[hash_index]
 	{
 		Slice_Mem slots       = {cell_cursor, m.cell_depth * m.slot_size}; // cell.slots
 		U8        slot_cursor = slots.ptr;
@@ -1646,7 +1649,7 @@ Str8 str8_from_u32(AllocatorInfo ainfo, U4 num, U4 radix, U4 min_digits, U4 digi
 				digits_until_separator = digit_group_size + 1;
 			}
 			else {
-				result.ptr[separator_pos] = (U1) char_to_lower(integer_symbols(cast(U8, num_reduce % radix)));
+				result.ptr[separator_pos] = (U1) char_to_lower(integer_symbols(u1_(num_reduce % radix)));
 				num_reduce /= radix;
 			}
 			digits_until_separator -= 1;
@@ -1829,7 +1832,7 @@ Str8* str8cache_set(KT1CX_Str8 kt, U8 key, Str8 value, AllocatorInfo str_reserve
 	slice_assert(value);
 	assert(str_reserve.proc != nullptr);
 	assert(backing_cells.proc != nullptr);
-	U8 entry = kt1cx_set(kt1cx_byte(kt), key, slice_mem(value.ptr, value.len), backing_cells, (KT1CX_ByteMeta){
+	U8 entry = kt1cx_set(kt1cx_byte(kt), key, slice_mem_s(value), backing_cells, (KT1CX_ByteMeta){
 		.slot_size        = size_of(KT1CX_Slot_Str8),
 		.slot_key_offset  = offset_of(KT1CX_Slot_Str8, key),
 		.cell_next_offset = offset_of(KT1CX_Cell_Str8, next),
@@ -1850,7 +1853,10 @@ Str8* str8cache_set(KT1CX_Str8 kt, U8 key, Str8 value, AllocatorInfo str_reserve
 inline
 Str8 cache_str8(Str8Cache_R cache, Str8 str) {
 	assert(cache != nullptr);
-	U8    key    = 0; hash64_djb8(& key, slice_mem_s(str));
+	U8    key    = 0; hash64_djb8(& key, 
+		(Slice_Mem){ u8_(str.ptr), str.len }
+		// slice_mem_s(str)
+	);
 	Str8* result = str8cache_set(cache->kt, key, str, cache->str_reserve, cache->cell_reserve);
 	return result[0];
 }
@@ -1874,14 +1880,14 @@ void str8gen_append_str8(Str8Gen_R gen, Str8 str){
 	gen->len += str.len;
 	gen->cap  = max(gen->len , gen->cap); // TODO(Ed): Arenas currently hide total capacity before growth. Problably better todo classic append to actually track this.
 }
-void str8gen__append_fmt(Str8Gen* gen, Str8 fmt_template, Slice_A2_Str8* entries){
+void str8gen__append_fmt(Str8Gen_R gen, Str8 fmt_template, Slice_A2_Str8* entries){
 	local_persist B1 tbl_mem[kilo(32)]; FArena tbl_arena = farena_make(slice_fmem(tbl_mem));
-	KT1L_Str8 kt     = {0}; kt1l_populate_slice_a2(Str8, & kt, ainfo_farena(tbl_arena), *entries );
+	KT1L_Str8 kt     = {0}; kt1l_populate_slice_a2(Str8, & kt, ainfo_farena(tbl_arena), entries[0] );
 	Slice_Mem buffer = { cast(U8, gen->ptr) + gen->len, gen->cap - gen->len };
 	if (buffer.len < kilo(16)) {
 		Slice_Mem result = mem_grow(gen->backing, str8gen_slice_mem(gen[0]), kilo(16) + gen->cap );
 		slice_assert(result);
-		gen->ptr  = cast(UTF8*, result.ptr);
+		gen->ptr  = cast(UTF8_R, result.ptr);
 		gen->cap += kilo(16);
 		buffer    = (Slice_Mem){ cast(U8, gen->ptr) + gen->len, gen->cap - gen->len };
 	}
@@ -1936,7 +1942,7 @@ void api_file_read_contents(FileOpInfo* result, Str8 path, Opts_read_file_conten
 	// Backing is required at this point
 	assert(opts.backing.proc != nullptr);
 	// This will limit a path for V1 to be 32kb worth of codepoints.
-	local_persist U8 scratch[kilo(64)];
+	local_persist U1 scratch[kilo(64)];
 	char const* path_cstr = str8_to_cstr_capped(path, slice_fmem(scratch) );
 	MS_HANDLE id_file = CreateFileA(
 		path_cstr,
@@ -1991,7 +1997,7 @@ void api_file_read_contents(FileOpInfo* result, Str8 path, Opts_read_file_conten
 void file_write_str8(Str8 path, Str8 content)
 {
 	slice_assert(path);
-	local_persist U8 scratch[kilo(64)] = {0};
+	local_persist U1 scratch[kilo(64)] = {0};
 	char const* path_cstr = str8_to_cstr_capped(path, slice_fmem(scratch));
 	MS_HANDLE id_file = CreateFileA(
 		path_cstr,
@@ -2289,11 +2295,11 @@ int main(void)
 
 	Arena* str_cache_kt1_ainfo = arena_make();
 	Str8Cache str_cache = str8cache_make(
-		.str_reserve    = ainfo_arena(arena_make()),
+		.str_reserve    = ainfo_arena(arena_make(.reserve_size = mega(256))),
 		.cell_reserve   = ainfo_arena(str_cache_kt1_ainfo),
 		.tbl_backing    = ainfo_arena(str_cache_kt1_ainfo),
-		.cell_pool_size = kilo(4),
-		.table_size     = kilo(32),
+		.cell_pool_size = kilo(8),
+		.table_size     = kilo(64),
 	);
 
 	Arena* a_lines = arena_make();
@@ -2308,7 +2314,7 @@ int main(void)
 	arena_reset(a_msgs);
 	arena_reset(a_toks);
 	Str8 listing = watl_dump_listing(ainfo_arena(a_msgs), parse_res.lines);
-	file_write_str8(lit("watl.v0.msvc.c.listing.txt"), listing);
+	file_write_str8(lit("watl.v0.lottes.c.listing.txt"), listing);
 	return 0;
 }
 

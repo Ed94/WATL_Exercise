@@ -1790,14 +1790,14 @@ void str8gen_append_str8(Str8Gen* gen, Str8 str){
 }
 void str8gen__append_fmt(Str8Gen* gen, Str8 fmt_template, Slice_A2_Str8* entries){
 	local_persist Byte tbl_mem[kilo(32)]; FArena tbl_arena = farena_make(slice_fmem(tbl_mem));
-	KT1L_Str8 kt = {0}; kt1l_populate_slice_a2(Str8, & kt, ainfo_farena(tbl_arena), *entries );
+	KT1L_Str8  kt     = {0}; kt1l_populate_slice_a2(Str8, & kt, ainfo_farena(tbl_arena), *entries );
 	Slice_Byte buffer = { gen->ptr + gen->len, gen->cap - gen->len };
 	if (buffer.len < kilo(16)) {
 		Slice_Byte result = mem_grow(gen->backing, str8gen_slice_byte(* gen), kilo(16) + gen->cap );
 		slice_assert(result);
 		gen->ptr  = result.ptr;
 		gen->cap += kilo(16);
-		buffer = (Slice_Byte){ cast(Byte*, gen->ptr + gen->len), gen->cap - gen->len };
+		buffer    = (Slice_Byte){ cast(Byte*, gen->ptr + gen->len), gen->cap - gen->len };
 	}
 	Str8 result = str8__fmt_kt1l(gen->backing, & buffer, kt, fmt_template);
 	gen->len += result.len;
