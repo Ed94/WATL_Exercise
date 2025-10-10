@@ -131,7 +131,7 @@ $compiler_args += $flag_link_win_rt_static_debug
 # Include setup
 $compiler_args += ($flag_include + $path_root)
 
-$unit_name   = "watl.v0.lottes"
+$unit_name   = "watl.v0.lottes_hybrid"
 
 # Specify unit to compile
 $unit           = join-path $path_root "C\$unit_name.c"

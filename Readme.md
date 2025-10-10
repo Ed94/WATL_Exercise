@@ -33,6 +33,8 @@ Embeddable scripting languages will be embedded as they should be.
 
 ## TODOs
 
+* Fix large-pages not working (at least on my system).
+
 * [x] Single-threaded C example
 * [] Multi-threaded C example
 * [] Add basic timing benchmark to C examples

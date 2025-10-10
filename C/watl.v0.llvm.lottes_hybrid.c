@@ -4,7 +4,7 @@ Version:   0 (From Scratch, 1-Stage Compilation, LLVM & WinAPI Only, Win CRT Mul
 Host:      Windows 11 (x86-64)
 Toolchain: LLVM (2025-08-30), C-Stanard: 11
 
-Based on: Neokineogfx - Fixing C
+Based on: Neokineogfx - Fixing C, personalized to include typeinfo more readily.
 https://youtu.be/RrL7121MOeA
 */
 
@@ -39,21 +39,6 @@ https://youtu.be/RrL7121MOeA
 #pragma region Header
 
 #pragma region DSL
-#if 0
-// Original macros
-
-#define A_(x)   __attribute__((aligned (x)))
-#define E_(x,y) __builtin_expect(x,y)
-#define S_      static
-#define I_      static inline __attribute__((always_inline))
-#define N_      static        __attribute__((noinline))
-#define R_      __restrict                                     
-#define V_      volatile                                       
-#define W_      __attribute((__stdcall__)) __attribute__((__force_align_arg_pointer__))
-#endif
-
-// Ones I'm deciding to use..
-
 #define align_(value)     __attribute__((aligned (value)))             // for easy alignment
 #define expect_(x, y)     __builtin_expect(x, y)                       // so compiler knows the common path
 #define finline           static inline __attribute__((always_inline)) // force inline
@@ -158,17 +143,17 @@ def_signed_ops(ge, >=) def_signed_ops(le, <=)
 #define ge_s(a,b)  def_generic_sop(ge, a,b)
 #define le_s(a,b)  def_generic_sop(le, a,b)
 
-finline U4 AtmAdd_u4 (U4_R a, U4 v){__asm__ volatile("lock xaddl %0,%1":"=r"(v),"=m"(*a):"0"(v),"m"(*a):"memory","cc");return v;}
-finline U8 AtmAdd_u8 (U8_R a, U8 v){__asm__ volatile("lock xaddq %0,%1":"=r"(v),"=m"(*a):"0"(v),"m"(*a):"memory","cc");return v;}
-finline U4 AtmSwap_u4(U4_R a, U4 v){__asm__ volatile("lock xchgl %0,%1":"=r"(v),"=m"(*a):"0"(v),"m"(*a):"memory","cc");return v;}
-finline U8 AtmSwap_u8(U8_R a, U8 v){__asm__ volatile("lock xchgq %0,%1":"=r"(v),"=m"(*a):"0"(v),"m"(*a):"memory","cc");return v;}
+finline U4 atm_add_u4 (U4_R a, U4 v){__asm__ volatile("lock xaddl %0,%1":"=r"(v),"=m"(*a):"0"(v),"m"(*a):"memory","cc");return v;}
+finline U8 atm_add_u8 (U8_R a, U8 v){__asm__ volatile("lock xaddq %0,%1":"=r"(v),"=m"(*a):"0"(v),"m"(*a):"memory","cc");return v;}
+finline U4 atm_swap_u4(U4_R a, U4 v){__asm__ volatile("lock xchgl %0,%1":"=r"(v),"=m"(*a):"0"(v),"m"(*a):"memory","cc");return v;}
+finline U8 atm_swap_u8(U8_R a, U8 v){__asm__ volatile("lock xchgq %0,%1":"=r"(v),"=m"(*a):"0"(v),"m"(*a):"memory","cc");return v;}
 #pragma endregion DSL
 
 #pragma region Strings
 typedef unsigned char def_tset(UTF8);
-typedef def_struct(Str8)       { UTF8*R_ ptr; U8 len; }; typedef Str8 def_tset(Slice_UTF8);
-typedef def_struct(Slice_Str8) { Str8*R_ ptr; U8 len; };
-#define lit(string_literal) (Str8){ (UTF8*R_) string_literal, size_of(string_literal) - 1 }
+typedef def_struct(Str8)       { UTF8* ptr; U8 len; }; typedef Str8 def_tset(Slice_UTF8);
+typedef def_struct(Slice_Str8) { Str8* ptr; U8 len; };
+#define lit(string_literal)    (Str8){ (UTF8*) string_literal, size_of(string_literal) - 1 }
 #pragma endregion Strings
 
 #pragma region Debug
@@ -217,10 +202,10 @@ U8 mem_copy            (U8 dest, U8 src, U8 length);
 U8 mem_copy_overlapping(U8 dest, U8 src, U8 length);
 B4 mem_zero            (U8 dest, U8 length);
  
-finline void BarC(void){__asm__ volatile("::""memory");} // Compiler Barrier
-finline void BarM(void){__builtin_ia32_mfence();}        // Memory   Barrier
-finline void BarR(void){__builtin_ia32_lfence();}        // Read     Barrier
-finline void BarW(void){__builtin_ia32_sfence();}        // Write    Barrier
+finline void barrier_compiler(void){__asm__ volatile("::""memory");} // Compiler Barrier
+finline void barrier_memory  (void){__builtin_ia32_mfence();}        // Memory   Barrier
+finline void barrier_read    (void){__builtin_ia32_lfence();}        // Read     Barrier
+finline void barrier_write   (void){__builtin_ia32_sfence();}        // Write    Barrier
 
 #define check_nil(nil, p) ((p) == 0 || (p) == nil)
 #define set_nil(nil, p)   ((p) = nil)
