@@ -1585,7 +1585,7 @@ Str8 str8__fmt_kt1l(AllocatorInfo ainfo, Slice_Byte* _buffer, KT1L_Str8 table, S
 	{
 		SSIZE copy_offset = 0;
 		// Forward until we hit the delimiter '<' or the template's contents are exhausted.
-		while (cursor_fmt[copy_offset] != cast(UTF8, '<') && (cursor_fmt + copy_offset) != slice_end(fmt_template)) {
+		while (cursor_fmt[copy_offset] != cast(UTF8, '<') && (cursor_fmt + copy_offset) < slice_end(fmt_template)) {
 			++ copy_offset;
 		}
 		memory_copy(cursor_buffer, cursor_fmt, copy_offset);
@@ -1598,11 +1598,11 @@ Str8 str8__fmt_kt1l(AllocatorInfo ainfo, Slice_Byte* _buffer, KT1L_Str8 table, S
 		{
 			UTF8* potential_token_cursor = cursor_fmt + 1;
 			SSIZE potential_token_len    = 0;
-			B32   fmt_overflow = false;
+			B32   fmt_overflow           = false;
 			for (;;) {
 				UTF8* cursor         = potential_token_cursor + potential_token_len;
 				fmt_overflow         = cursor >= slice_end(fmt_template);
-				B32 found_terminator = * (potential_token_cursor + potential_token_len) == '>';
+				B32 found_terminator = potential_token_cursor[potential_token_len] == '>';
 				if (fmt_overflow || found_terminator) { break; }
 				++ potential_token_len;
 			}
@@ -1633,7 +1633,7 @@ Str8 str8__fmt_kt1l(AllocatorInfo ainfo, Slice_Byte* _buffer, KT1L_Str8 table, S
 				left_fmt         -= potential_token_len + 2; // The 2 here are the '<' & '>' delimiters being omitted.
 				continue;
 			}
-			// If not a value, we do a single copy for the '<' and continue.
+			// If not a subsitution, we do a single copy for the '<' and continue.
 			*  cursor_buffer = * cursor_fmt;
 			++ cursor_buffer;
 			++ cursor_fmt;

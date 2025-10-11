@@ -1677,38 +1677,38 @@ Str8 str8__fmt_kt1l(AllocatorInfo ainfo, Slice_Mem*R_ _buffer, KT1L_Str8 table, 
 	UTF8_R cursor_buffer    = cast(UTF8_R, buffer.ptr);
 	U8     buffer_remaining = buffer.len;
 
-	UTF8   curr_code  = fmt_template.ptr[0];
 	UTF8_R cursor_fmt = fmt_template.ptr;
 	U8     left_fmt   = fmt_template.len;
 	while (left_fmt && buffer_remaining)
 	{
 		// Forward until we hit the delimiter '<' or the template's contents are exhausted.
-		while (curr_code && curr_code != '<' && cursor_fmt != slice_end(fmt_template)) {
-			cursor_buffer[0] = cursor_fmt[0];
-			++ cursor_buffer;
-			++ cursor_fmt;
-			-- buffer_remaining;
-			-- left_fmt;
-			curr_code = cursor_fmt[0];
+		U8 copy_offset = 0;
+		while (cursor_fmt[copy_offset] != '<' && (cursor_fmt + copy_offset) < slice_end(fmt_template)) {
+			++ copy_offset;
 		}
-		if (curr_code == '<')
+		memory_copy(u8_(cursor_buffer), u8_(cursor_fmt), copy_offset);
+		buffer_remaining -= copy_offset;
+		left_fmt         -= copy_offset;
+		cursor_buffer    += copy_offset;
+		cursor_fmt       += copy_offset;
+
+		if (cursor_fmt[0] == '<')
 		{
-			UTF8_R cursor_potential_token = cursor_fmt + 1;
-			U8     potential_token_length = 0;
-			B4     fmt_overflow = false;
+			UTF8_R potential_token_cursor = cursor_fmt + 1;
+			U8     potential_token_len    = 0;
+			B4     fmt_overflow           = false;
 			for (;;) {
-				UTF8_R cursor       = cursor_potential_token + potential_token_length;
+				UTF8_R cursor       = potential_token_cursor + potential_token_len;
 				fmt_overflow        = cursor >= slice_end(fmt_template);
-				B4 found_terminator = (cursor_potential_token + potential_token_length)[0] == '>';
+				B4 found_terminator = potential_token_cursor[potential_token_len] == '>';
 				if (fmt_overflow || found_terminator) { break; }
-				++ potential_token_length;
+				++ potential_token_len;
 			}
 			if (fmt_overflow) continue;
 			// Hashing the potential token and cross checking it with our token table
-			U8     key   = 0; hash64_djb8(& key, slice_mem(u8_(cursor_potential_token), potential_token_length));
+			U8     key   = 0; hash64_djb8(& key, slice_mem(u8_(potential_token_cursor), potential_token_len));
 			Str8_R value = nullptr;
-			for (slice_iter(table, token))
-			{
+			for (slice_iter(table, token)) {
 				// We do a linear iteration instead of a hash table lookup because the user should be never substiuting with more than 100 unqiue tokens..
 				if (token->key == key) {
 					value = & token->value;
@@ -1718,32 +1718,26 @@ Str8 str8__fmt_kt1l(AllocatorInfo ainfo, Slice_Mem*R_ _buffer, KT1L_Str8 table, 
 			if (value)
 			{
 				// We're going to appending the string, make sure we have enough space in our buffer.
-				if (ainfo.proc != nullptr && (buffer_remaining - potential_token_length) <= 0) {
-					buffer            = mem_grow(ainfo, buffer, buffer.len + potential_token_length);
-					buffer_remaining += potential_token_length;
+				if (ainfo.proc != nullptr && (buffer_remaining - potential_token_len) <= 0) {
+					buffer            = mem_grow(ainfo, buffer, buffer.len + potential_token_len);
+					buffer_remaining += potential_token_len;
 				}
-				U8   left         = value->len;
-				U1_R cursor_value = value->ptr;
-
-				while (left && buffer_remaining) {
-					cursor_buffer[0] = cursor_value[0];
-					++ cursor_buffer;
-					++ cursor_value;
-					-- buffer_remaining;
-					-- left;
-				}
+				assert((buffer_remaining - potential_token_len) > 0);
+				memory_copy(u8_(cursor_buffer), u8_(value->ptr), value->len);
 				// Sync cursor format to after the processed token
-				cursor_fmt = cursor_potential_token + potential_token_length + 1;
-				curr_code  = cursor_fmt[0];
-				left_fmt  -= potential_token_length + 2; // The 2 here are the '<' & '>' delimiters being omitted.
+				cursor_buffer    += value->len;
+				buffer_remaining -= value->len;
+				cursor_fmt        = potential_token_cursor + potential_token_len + 1;
+				left_fmt         -= potential_token_len + 2; // The 2 here are the '<' & '>' delimiters being omitted.
 				continue;
 			}
+			// If not a subsitution, we do a single copy for the '<' and continue.
 			cursor_buffer[0] = cursor_fmt[0];
 			++ cursor_buffer;
 			++ cursor_fmt;
 			-- buffer_remaining;
 			-- left_fmt;
-			curr_code = cursor_fmt[0];
+			continue;
 		}
 	}
 	_buffer[0] = buffer;
@@ -2277,7 +2271,7 @@ int main(void)
 	os_init();
 
 	VArena_R vm_file = varena_make(.reserve_size = giga(4), .flags = VArenaFlag_NoLargePages);
-	FileOpInfo file  = file_read_contents(lit("watl.v0.msvc.c"), .backing = ainfo_varena(vm_file));
+	FileOpInfo file  = file_read_contents(lit("watl.v0.llvm.lottes_hybrid.c"), .backing = ainfo_varena(vm_file));
 	slice_assert(file.content);
 
 	Arena_R a_msgs = arena_make();
