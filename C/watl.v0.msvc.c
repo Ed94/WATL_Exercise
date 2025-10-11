@@ -16,77 +16,61 @@ Toolchain: MSVC 19.43, C-Stanard: 11
 #pragma region Header
 
 #pragma region DSL
-typedef unsigned __int8  U8;
-typedef signed   __int8  S8;
-typedef unsigned __int16 U16;
-typedef signed   __int16 S16;
-typedef unsigned __int32 U32;
-typedef signed   __int32 S32;
-typedef unsigned __int64 U64;
-typedef signed   __int64 S64;
-typedef unsigned char    Byte;
-typedef unsigned __int64 USIZE;
-typedef          __int64 SSIZE;
-typedef S8               B8;
-typedef S16              B16;
-typedef S32              B32;
-enum {
-	false = 0,
-	true  = 1,
-	true_overflow,
-};
 #define glue_impl(A, B)                     A ## B
 #define glue(A, B)                          glue_impl(A, B)
 #define stringify_impl(S)                   #S
 #define stringify(S)                        stringify_impl(S)
 #define tmpl(prefix, type)                  prefix ## _ ## type
 
+#define local_persist                       static
+#define global                              static
+#define internal                            static
+
+#define static_assert                       _Static_assert
+#define typeof                              __typeof__
+#define typeof_ptr(ptr)                     typeof(ptr[0])
+#define typeof_same(a, b)                   _Generic((a), typeof((b)): 1, default: 0)
+
+typedef unsigned __int8  U8;    typedef unsigned __int16 U16; typedef unsigned __int32 U32; typedef unsigned __int64 U64;
+typedef signed   __int8  S8;    typedef signed   __int16 S16; typedef signed   __int32 S32; typedef signed   __int64 S64;
+typedef unsigned char    Byte;  typedef S8               B8;  typedef S16              B16; typedef S32              B32;
+typedef unsigned __int64 USIZE; typedef __int64 SSIZE;
+typedef float            F32;   typedef double  F64;
+enum { false = 0, true  = 1, true_overflow, };
+
+#define farray_len(array)                   (SSIZE)sizeof(array) / size_of( typeof((array)[0]))
+#define farray_init(type, ...)              (type[]){__VA_ARGS__}
+
 #define alignas                             _Alignas
 #define alignof                             _Alignof
 #define byte_pad(amount, ...)               Byte glue(_PAD_, __VA_ARGS__) [amount]
-#define farray_len(array)                   (SSIZE)sizeof(array) / size_of( typeof((array)[0]))
-#define farray_init(type, ...)              (type[]){__VA_ARGS__}
 #define def_farray(type, len)               type A ## len ## _ ## type[len]
 #define def_enum(underlying_type, symbol)   underlying_type symbol; enum   symbol
 #define def_struct(symbol)                  struct symbol symbol;   struct symbol
 #define def_union(symbol)                   union  symbol symbol;   union  symbol
 #define def_proc(symbol)                    symbol
 #define opt_args(symbol, ...)               &(symbol){__VA_ARGS__}
-#define ret_type(type)                      type
-#define local_persist                       static
-#define global                              static
-#define offset_of(type, member)             cast(SSIZE, & (((type*) 0)->member))
-#define static_assert                       _Static_assert
-#define typeof                              __typeof__
-#define typeof_ptr(ptr)                     typeof(ptr[0])
-#define typeof_same(a, b)                   _Generic((a), typeof((b)): 1, default: 0)
 
 #define cast(type, data)                    ((type)(data))
 #define pcast(type, data)                   * cast(type*, & (data))
 #define nullptr                             cast(void*, 0)
+#define offset_of(type, member)             cast(SSIZE, & (((type*) 0)->member))
 #define size_of(data)                       cast(SSIZE, sizeof(data))
+
 #define kilo(n)                             (cast(SSIZE, n) << 10)
 #define mega(n)                             (cast(SSIZE, n) << 20)
 #define giga(n)                             (cast(SSIZE, n) << 30)
 #define tera(n)                             (cast(SSIZE, n) << 40)
 
-#define span_iter(type, iter, m_begin, op, m_end)  \
-	tmpl(Iter_Span,type) iter = { \
-		.r = {(m_begin), (m_end)},   \
-		.cursor = (m_begin) };       \
-	iter.cursor op iter.r.end;     \
-	++ iter.cursor
-
-#define def_span(type)                                                \
-	        def_struct(tmpl(     Span,type)) { type begin; type end; }; \
-	typedef def_struct(tmpl(Iter_Span,type)) { tmpl(Span,type) r; type cursor; }
-
-typedef def_span(S32);
-typedef def_span(U32);
-typedef def_span(SSIZE);
-
 typedef void def_proc(VoidFn) (void);
 #pragma endregion DSL
+
+#pragma region Strings
+typedef unsigned char UTF8;
+typedef def_struct(Str8)       { UTF8* ptr; SSIZE len; }; typedef Str8 Slice_UTF8;
+typedef def_struct(Slice_Str8) { Str8* ptr; SSIZE len; };
+#define lit(string_literal)    (Str8){ (UTF8*) string_literal, size_of(string_literal) - 1 }
+#pragma endregion Strings
 
 #pragma region Debug
 #if !defined(BUILD_DEBUG)
@@ -133,6 +117,25 @@ void* memory_copy            (void* restrict dest, void const* restrict src, USI
 void* memory_copy_overlapping(void* restrict dest, void const* restrict src, USIZE length);
 B32   memory_zero            (void* dest, USIZE length);
 
+#define check_nil(nil, p) ((p) == 0 || (p) == nil)
+#define set_nil(nil, p)   ((p) = nil)
+
+#define sll_stack_push_n(f, n, next) do { (n)->next = (f); (f) = (n); } while(0)
+
+#define sll_queue_push_nz(nil, f, l, n, next) \
+(                           \
+	check_nil(nil, f) ? (     \
+		(f) = (l) = (n),        \
+		set_nil(nil, (n)->next) \
+	)                         \
+	: (                       \
+		(l)->next=(n),          \
+		(l) = (n),              \
+		set_nil(nil,(n)->next)  \
+	)                         \
+)
+#define sll_queue_push_n(f, l, n, next) sll_queue_push_nz(0, f, l, n, next)
+
 #define def_Slice(type)        \
 def_struct(tmpl(Slice,type)) { \
 	type* ptr; \
@@ -164,24 +167,20 @@ void slice__zero(Slice_Byte mem, SSIZE typewidth);
 	.len = farray_len( farray_init(type, __VA_ARGS__)) \
 }
 
-#define check_nil(nil, p) ((p) == 0 || (p) == nil)
-#define set_nil(nil, p)   ((p) = nil)
+#define span_iter(type, iter, m_begin, op, m_end)  \
+	tmpl(Iter_Span,type) iter = { \
+		.r = {(m_begin), (m_end)},  \
+		.cursor = (m_begin) };      \
+	iter.cursor op iter.r.end;    \
+	++ iter.cursor
 
-#define sll_stack_push_n(f, n, next) do { (n)->next = (f); (f) = (n); } while(0)
+#define def_span(type)                                                \
+	        def_struct(tmpl(     Span,type)) { type begin; type end; }; \
+	typedef def_struct(tmpl(Iter_Span,type)) { tmpl(Span,type) r; type cursor; }
 
-#define sll_queue_push_nz(nil, f, l, n, next) \
-(                           \
-	check_nil(nil, f) ? (     \
-		(f) = (l) = (n),        \
-		set_nil(nil, (n)->next) \
-	)                         \
-	: (                       \
-		(l)->next=(n),          \
-		(l) = (n),              \
-		set_nil(nil,(n)->next)  \
-	)                         \
-)
-#define sll_queue_push_n(f, l, n, next) sll_queue_push_nz(0, f, l, n, next)
+typedef def_span(S32);
+typedef def_span(U32);
+typedef def_span(SSIZE);
 #pragma endregion Memory
 
 #pragma region Math
@@ -189,14 +188,6 @@ void slice__zero(Slice_Byte mem, SSIZE typewidth);
 #define max(A, B)       (((A) > (B)) ? (A) : (B))
 #define clamp_bot(X, B) max(X, B)
 #pragma endregion Math
-
-#pragma region Strings
-typedef unsigned char UTF8;
-typedef def_Slice(UTF8);
-typedef Slice_UTF8 Str8;
-typedef def_Slice(Str8);
-#define lit(string_literal) (Str8){ (UTF8*) string_literal, size_of(string_literal) - 1 }
-#pragma endregion Strings
 
 #pragma region Allocator Interface
 typedef def_enum(U32, AllocatorOp) {
@@ -340,7 +331,7 @@ inline B32   os__vmem_commit(void* vm, SSIZE size, Opts_vmem* opts);
 inline Byte* os__vmem_reserve(SSIZE size, Opts_vmem* opts);
 inline void  os_vmem_release(void* vm, SSIZE size);
 
-#define os_vmem_reserve(size, ...)    os__vmem_reserve(size, opt_args(Opts_vmem, __VA_ARGS__))
+#define os_vmem_reserve(size, ...)    os__vmem_reserve(   size, opt_args(Opts_vmem, __VA_ARGS__))
 #define os_vmem_commit(vm, size, ...) os__vmem_commit(vm, size, opt_args(Opts_vmem, __VA_ARGS__))
 #pragma endregion OS
 
@@ -604,16 +595,16 @@ void str8gen__append_fmt(Str8Gen* gen, Str8 fmt_template, Slice_A2_Str8* tokens)
 typedef def_struct(FileOpInfo) {
 	Slice_Byte content;
 };
-typedef def_struct(Opts_read_file_contents) {
+typedef def_struct(Opts_file_read_contents) {
 	AllocatorInfo backing;
 	B32           zero_backing;
 	byte_pad(4);
 };
-void api_file_read_contents(FileOpInfo* result, Str8 path, Opts_read_file_contents opts);
+void api_file_read_contents(FileOpInfo* result, Str8 path, Opts_file_read_contents opts);
 void file_write_str8       (Str8 path, Str8 content);
 
-FileOpInfo file__read_contents(Str8 path, Opts_read_file_contents* opts);
-#define file_read_contents(path, ...) file__read_contents(path, &(Opts_read_file_contents){__VA_ARGS__})
+FileOpInfo file__read_contents(Str8 path, Opts_file_read_contents* opts);
+#define file_read_contents(path, ...) file__read_contents(path, opt_args(Opts_file_read_contents, __VA_ARGS__))
 #pragma endregion File System
 
 #pragma region WATL
@@ -655,7 +646,7 @@ typedef def_struct(Opts_watl_lex) {
 };
 void         api_watl_lex(WATL_LexInfo* info, Str8 source, Opts_watl_lex* opts);
 WATL_LexInfo watl__lex   (                    Str8 source, Opts_watl_lex* opts);
-#define watl_lex(source, ...) watl__lex(source, &(Opts_watl_lex){__VA_ARGS__})
+#define watl_lex(source, ...) watl__lex(source, opt_args(Opts_watl_lex, __VA_ARGS__))
 
 typedef Str8 WATL_Node;
 typedef def_Slice(WATL_Node);
@@ -687,7 +678,7 @@ typedef def_struct(Opts_watl_parse) {
 };
 void           api_watl_parse(WATL_ParseInfo* info, Slice_WATL_Tok tokens, Opts_watl_parse* opts);
 WATL_ParseInfo watl__parse   (                      Slice_WATL_Tok tokens, Opts_watl_parse* opts);
-#define watl_parse(tokens, ...) watl__parse(tokens, &(Opts_watl_parse){__VA_ARGS__})
+#define watl_parse(tokens, ...) watl__parse(tokens, opt_args(Opts_watl_parse, __VA_ARGS__))
 
 Str8 watl_dump_listing(AllocatorInfo buffer, Slice_WATL_Line lines);
 #pragma endregion WATL

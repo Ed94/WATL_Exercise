@@ -1,12 +1,9 @@
 # WATL Exercise
 
 An exercise on making the "Whitespace Aware Text Layout" parser with different languages or conventions. It simply gets a structural idea of the lines and chunks (visbile and whitespace) for a text file.  
-The purpose of this exercise is convey succiently many core pragmatic concepts for code in a small program.  
 The intent was to use this as a working set of samples for my code visualizing and editing prototyping.
 
-The code conveys a convention for doing "systems" programming I've synthesized after studying how several people in the "handmade" community have written their exposed libraries or codebases.
-
-The goal of the exercise is always the following:
+The goal of is always the following:
 
 ```odin
 start:
@@ -18,6 +15,8 @@ start:
     file.write_str(str.fmt("<name>.listing.source", self.source.name))
 end
 ```
+
+The exercise is done in several conventions but are generally pragmatic and relatively low abstraction. Favoring composition to construct anything. It succiently conveys many core pragmatic concepts for code in a small source file.  
 
 There are plans for multiple versions of the program:
 

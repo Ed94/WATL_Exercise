@@ -115,6 +115,9 @@ enum { false = 0, true  = 1, true_overflow, };
 #define offset_of(type, member)             cast(U8, & (((type*) 0)->member))
 #define size_of(data)                       cast(U8, sizeof(data))
 
+#define r_(ptr)                             cast(typeof_ptr(ptr)*R_, ptr)
+#define v_(ptr)                             cast(typeof_ptr(ptr)*V_, ptr)
+
 #define kilo(n)                             (cast(U8, n) << 10)
 #define mega(n)                             (cast(U8, n) << 20)
 #define giga(n)                             (cast(U8, n) << 30)
@@ -226,7 +229,7 @@ finline void barrier_write   (void){__builtin_ia32_sfence();}        // Write   
 )
 #define sll_queue_push_n(f, l, n, next) sll_queue_push_nz(0, f, l, n, next)
 
-#define def_Slice(type)           def_struct(tmpl(Slice,type)) { type*R_ ptr; U8 len; }; typedef def_ptr_set(tmpl(Slice,type))
+#define def_Slice(type)           def_struct(tmpl(Slice,type)) { type* ptr; U8 len; }; typedef def_ptr_set(tmpl(Slice,type))
 #define slice_assert(slice)       do { assert((slice).ptr != 0); assert((slice).len > 0); } while(0)
 #define slice_end(slice)          ((slice).ptr + (slice).len)
 #define size_of_slice_type(slice) size_of( (slice).ptr[0] )
@@ -237,7 +240,7 @@ typedef def_struct(Slice_Mem) { U8 ptr; U8 len; };
 
 typedef def_Slice(void);
 typedef def_Slice(B1);
-#define slice_byte(slice) ((Slice_B1){cast(B1_R, (slice).ptr), (slice).len * size_of_slice_type(slice)})
+#define slice_byte(slice) ((Slice_B1){cast(B1*, (slice).ptr), (slice).len * size_of_slice_type(slice)})
 #define slice_fmem(mem)   slice_mem(u8_(mem), size_of(mem))
 
 finline void slice__copy(Slice_B1 dest, U8 dest_typewidth, Slice_B1 src, U8 src_typewidth);
@@ -371,8 +374,8 @@ finline Slice_Mem mem__shrink(AllocatorInfo ainfo, Slice_Mem mem, U8 size, Opts_
 #define mem_resize(ainfo, mem, size, ...) mem__resize(ainfo, mem, size, opt_args(Opts_mem_resize, __VA_ARGS__))
 #define mem_shrink(ainfo, mem, size, ...) mem__shrink(ainfo, mem, size, opt_args(Opts_mem_shrink, __VA_ARGS__))
 
-#define alloc_type(ainfo, type, ...)       (type*R_)                    mem__alloc(ainfo, size_of(type),        opt_args(Opts_mem_alloc, __VA_ARGS__)).ptr
-#define alloc_slice(ainfo, type, num, ...) (tmpl(Slice,type)){ (type*R_)mem__alloc(ainfo, size_of(type) * num,  opt_args(Opts_mem_alloc, __VA_ARGS__)).ptr, num }
+#define alloc_type(ainfo, type, ...)       (type*)                    mem__alloc(ainfo, size_of(type),        opt_args(Opts_mem_alloc, __VA_ARGS__)).ptr
+#define alloc_slice(ainfo, type, num, ...) (tmpl(Slice,type)){ (type*)mem__alloc(ainfo, size_of(type) * num,  opt_args(Opts_mem_alloc, __VA_ARGS__)).ptr, num }
 #pragma endregion Allocator Interface
 
 #pragma region FArena (Fixed-Sized Arena)
@@ -405,8 +408,8 @@ cast(type*R_, farena__push(arena, size_of(type), 1, opt_args(Opts_farena, lit(st
 #pragma endregion FArena
 
 #pragma region OS
-finline U8   Clk  (void){U8 aa,dd;__asm__ volatile("rdtsc":"=a"(aa),"=d"(dd));return aa;}
-finline void Pause(void){__asm__ volatile("pause":::"memory");}
+finline U8   clock(void){U8 aa,dd;__asm__ volatile("rdtsc":"=a"(aa),"=d"(dd));return aa;}
+finline void pause(void){__asm__ volatile("pause":::"memory");}
 
 typedef def_struct(OS_SystemInfo) {
 	U8 target_page_size;
@@ -448,7 +451,7 @@ typedef def_struct(Opts_varena_make) {
 	VArenaFlags flags;
 	A4_B1 _PAD_;
 };
-VArena_R varena__make(Opts_varena_make*R_ opts);
+VArena*   varena__make(Opts_varena_make*R_ opts);
 #define   varena_make(...) varena__make(opt_args(Opts_varena_make, __VA_ARGS__))
 
         Slice_Mem   varena__push  (VArena_R arena, U8 amount, U8 type_width, Opts_varena*R_ opts);
@@ -464,7 +467,7 @@ void varena_allocator_proc(AllocatorProc_In in, AllocatorProc_Out_R out);
 #define varena_push_mem(arena, amount, ...) varena__push(arena, amount, 1, opt_args(Opts_varena, lit(stringify(B1)), __VA_ARGS__))
 
 #define varena_push(arena, type, ...) \
-cast(type*R_, varena__push(arena, 1, size_of(type), opt_args(Opts_varena, lit(stringify(type)), __VA_ARGS__) ).ptr)
+cast(type*, varena__push(arena, 1, size_of(type), opt_args(Opts_varena, lit(stringify(type)), __VA_ARGS__) ).ptr)
 
 #define varena_push_array(arena, type, amount, ...) \
 (tmpl(Slice,type)){ varena__push(arena, size_of(type), amount, opt_args(Opts_varena, lit(stringify(type)), __VA_ARGS__)).ptr, amount }
@@ -477,16 +480,16 @@ typedef def_enum(U4, ArenaFlags) {
 	ArenaFlag_NoChain      = (1 << 1),
 };
 typedef def_struct(Arena) {
-	VArena_R   backing;
-	Arena_R    prev;
-	Arena_R    current;
+	VArena*    backing;
+	Arena*     prev;
+	Arena*     current;
 	U8         base_pos;
 	U8         pos;
 	ArenaFlags flags;
 	A4_B1 _PAD_;
 };
 typedef Opts_varena_make Opts_arena_make;
-        Arena_R     arena__make  (Opts_arena_make*R_ opts);
+        Arena*      arena__make  (Opts_arena_make*R_ opts);
         Slice_Mem   arena__push  (Arena_R arena, U8 amount, U8 type_width, Opts_arena*R_ opts);
 finline void        arena_release(Arena_R arena);
 finline void        arena_reset  (Arena_R arena);
@@ -562,10 +565,10 @@ def_struct(tmpl(KT1CX_Slot,type)) { \
 	B4   occupied; \
 	A4_B1 _PAD_;   \
 }
-#define def_KT1CX_Cell(type, depth)      \
-def_struct(tmpl(KT1CX_Cell,type)) {      \
-	tmpl(KT1CX_Slot,type)    slots[depth]; \
-	tmpl(KT1CX_Slot,type)*R_ next;         \
+#define def_KT1CX_Cell(type, depth)    \
+def_struct(tmpl(KT1CX_Cell,type)) {    \
+	tmpl(KT1CX_Slot,type)  slots[depth]; \
+	tmpl(KT1CX_Slot,type)* next;         \
 }
 #define def_KT1CX(type)                  \
 def_struct(tmpl(KT1CX,type)) {           \
@@ -609,7 +612,7 @@ typedef def_struct(KT1CX_Info) {
 	AllocatorInfo backing_cells;
 };
         void kt1cx_init   (KT1CX_Info info, KT1CX_InfoMeta m, KT1CX_Byte*R_ result);
-        void kt1cx_clear  (KT1CX_Byte kt,  KT1CX_ByteMeta meta);
+        void kt1cx_clear  (KT1CX_Byte kt,          KT1CX_ByteMeta meta);
 finline U8   kt1cx_slot_id(KT1CX_Byte kt,  U8 key, KT1CX_ByteMeta meta);
         U8   kt1cx_get    (KT1CX_Byte kt,  U8 key, KT1CX_ByteMeta meta);
         U8   kt1cx_set    (KT1CX_Byte kt,  U8 key, Slice_Mem value, AllocatorInfo backing_cells, KT1CX_ByteMeta meta);
@@ -636,7 +639,7 @@ typedef def_Slice(A2_Str8);
 typedef def_KT1L_Slot(Str8);
 typedef def_KT1L(Str8);
 
-finline Str8 str8__fmt_backed(AllocatorInfo tbl_backing, AllocatorInfo buf_backing, Str8 fmt_template, Slice_A2_Str8* entries);
+finline Str8 str8__fmt_backed(AllocatorInfo tbl_backing, AllocatorInfo buf_backing, Str8 fmt_template, Slice_A2_Str8*R_ entries);
 #define str8_fmt_backed(tbl_backing, buf_backing, fmt_template, ...) \
 str8__fmt_backed(tbl_backing, buf_backing, lit(fmt_template), slice_arg_from_array(A2_Str8, __VA_ARGS__))
 
@@ -677,9 +680,9 @@ finline Str8 cache_str8(Str8Cache_R cache, Str8 str);
 
 typedef def_struct(Str8Gen) {
 	AllocatorInfo backing;
-	UTF8_R ptr;
-	U8     len;
-	U8     cap;
+	UTF8* ptr;
+	U8    len;
+	U8    cap;
 };
 finline void    str8gen_init(Str8Gen_R gen, AllocatorInfo backing);
 finline Str8Gen str8gen_make(               AllocatorInfo backing);
@@ -707,7 +710,7 @@ void api_file_read_contents(FileOpInfo_R result, Str8 path, Opts_read_file_conte
 void file_write_str8       (Str8 path, Str8 content);
 
 finline FileOpInfo file__read_contents(Str8 path, Opts_read_file_contents*R_ opts);
-#define file_read_contents(path, ...) file__read_contents(path, &(Opts_read_file_contents){__VA_ARGS__})
+#define file_read_contents(path, ...) file__read_contents(path, opt_args(Opts_read_file_contents, __VA_ARGS__))
 #pragma endregion File System
 
 #pragma region WATL
@@ -728,13 +731,13 @@ typedef def_struct(WATL_Pos) {
 	S4 column;
 };
 typedef def_struct(WATL_LexMsg) {
-	WATL_LexMsg_R next;
-	Str8          content;
-	WATL_Tok_R    tok;
-	WATL_Pos      pos;
+	WATL_LexMsg* next;
+	Str8         content;
+	WATL_Tok*    tok;
+	WATL_Pos     pos;
 };
 typedef def_struct(WATL_LexInfo) {
-	WATL_LexMsg_R  msgs;
+	WATL_LexMsg*   msgs;
 	Slice_WATL_Tok toks;
 	WATL_LexStatus signal;
 	A4_B1 _PAD_;
@@ -749,17 +752,17 @@ typedef def_struct(Opts_watl_lex) {
 };
 void         api_watl_lex(WATL_LexInfo_R info, Str8 source, Opts_watl_lex*R_ opts);
 WATL_LexInfo watl__lex   (                     Str8 source, Opts_watl_lex*R_ opts);
-#define watl_lex(source, ...) watl__lex(source, &(Opts_watl_lex){__VA_ARGS__})
+#define watl_lex(source, ...) watl__lex(source, opt_args(Opts_watl_lex, __VA_ARGS__))
 
 typedef Str8 WATL_Node; typedef def_ptr_set(WATL_Node);
 typedef def_Slice(WATL_Node);
 typedef Slice_WATL_Node def_tset(WATL_Line);
 typedef def_Slice(WATL_Line);
 typedef def_struct(WATL_ParseMsg) {
-	WATL_ParseMsg_R next;
+	WATL_ParseMsg* next;
 	Str8        content;
-	WATL_Line_R line;
-	WATL_Tok_R  tok;
+	WATL_Line*  line;
+	WATL_Tok*   tok;
 	WATL_Pos    pos;
 };
 typedef def_enum(U4, WATL_ParseStatus) {
@@ -767,7 +770,7 @@ typedef def_enum(U4, WATL_ParseStatus) {
 };
 typedef def_struct(WATL_ParseInfo) {
 	Slice_WATL_Line  lines;
-	WATL_ParseMsg_R  msgs;
+	WATL_ParseMsg*   msgs;
 	WATL_ParseStatus signal;
 	A4_B1 _PAD_;
 };
@@ -775,13 +778,13 @@ typedef def_struct(Opts_watl_parse) {
 	AllocatorInfo ainfo_msgs;
 	AllocatorInfo ainfo_nodes;
 	AllocatorInfo ainfo_lines;
-	Str8Cache_R   str_cache;
+	Str8Cache*    str_cache;
 	B4 failon_slice_constraint_fail;
 	A4_B1 _PAD_;
 };
 void           api_watl_parse(WATL_ParseInfo_R info, Slice_WATL_Tok tokens, Opts_watl_parse*R_ opts);
 WATL_ParseInfo watl__parse   (                       Slice_WATL_Tok tokens, Opts_watl_parse*R_ opts);
-#define watl_parse(tokens, ...) watl__parse(tokens, &(Opts_watl_parse){__VA_ARGS__})
+#define watl_parse(tokens, ...) watl__parse(tokens, opt_args(Opts_watl_parse, __VA_ARGS__))
 
 Str8 watl_dump_listing(AllocatorInfo buffer, Slice_WATL_Line lines);
 #pragma endregion WATL
@@ -800,7 +803,7 @@ U8 align_pow2(U8 x, U8 b) {
     assert((b & (b - 1)) == 0);  // Check power of 2
     return ((x + b - 1) & (~(b - 1)));
 }
-U8 memory_copy(U8 dest, U8 src, U8 len) __asm__("memcpy");
+U8 memory_copy            (U8 dest, U8 src, U8 len) __asm__("memcpy");
 U8 memory_copy_overlapping(U8 dest, U8 src, U8 len) __asm__("memmove");
 finline
 B4 memory_zero(U8 dest, U8 length) {
@@ -1133,7 +1136,7 @@ inline void  os_vmem_release(U8 vm, U8 size) { VirtualFree(cast(MS_LPVOID, vm), 
 
 #pragma region VArena (Virutal Address Space Arena)
 inline
-VArena_R varena__make(Opts_varena_make*R_ opts) {
+VArena* varena__make(Opts_varena_make*R_ opts) {
 	assert(opts != nullptr);
 	if (opts->reserve_size == 0) { opts->reserve_size = mega(64); }
 	if (opts->commit_size  == 0) { opts->commit_size  = mega(64); }
@@ -1144,8 +1147,8 @@ VArena_R varena__make(Opts_varena_make*R_ opts) {
 	assert(base != 0);
 	os_vmem_commit(base, commit_size, .no_large_pages = no_large_pages);
 	U8 header_size = align_pow2(size_of(VArena), MEMORY_ALIGNMENT_DEFAULT);
-	VArena_R vm = cast(VArena_R, base);
-	vm[0] = (VArena){
+	VArena* vm = cast(VArena*, base);
+	r_(vm)[0] = (VArena){
 		.reserve_start = base + header_size,
 		.reserve       = reserve_size,
 		.commit_size   = commit_size,
@@ -1279,13 +1282,13 @@ void varena_allocator_proc(AllocatorProc_In in, AllocatorProc_Out* out)
 
 #pragma region Arena (Chained Arena)
 inline
-Arena_R arena__make(Opts_arena_make*R_ opts) {
+Arena* arena__make(Opts_arena_make*R_ opts) {
 	assert(opts != nullptr);
 	U8 header_size  = align_pow2(size_of(Arena), MEMORY_ALIGNMENT_DEFAULT);
 	VArena_R current = varena__make(opts);
 	assert(current != nullptr);
-	Arena_R arena = varena_push(current, Arena);
-	arena[0] = (Arena){
+	Arena* arena = varena_push(current, Arena);
+	r_(arena)[0] = (Arena){
 		.backing  = current,
 		.prev     = nullptr,
 		.current  = arena,
