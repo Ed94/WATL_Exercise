@@ -162,12 +162,12 @@ void slice__zero(Slice_Byte mem, SSIZE typewidth);
 	typeof((container).ptr) iter = (container).ptr; \
 	iter != slice_end(container);                   \
 	++ iter
-#define slice_arg_from_array(type, ...) & (tmpl(Slice,type)) {  \
+#define slice_arg_from_array(type, ...) & (tmpl(Slice,type)) { \
 	.ptr = farray_init(type, __VA_ARGS__),             \
 	.len = farray_len( farray_init(type, __VA_ARGS__)) \
 }
 
-#define span_iter(type, iter, m_begin, op, m_end)  \
+#define span_iter(type, iter, m_begin, op, m_end) \
 	tmpl(Iter_Span,type) iter = { \
 		.r = {(m_begin), (m_end)},  \
 		.cursor = (m_begin) };      \
@@ -1389,10 +1389,8 @@ void kt1cx_init(KT1CX_Info info, KT1CX_InfoMeta m, KT1CX_Byte* result) {
 	assert(m.cell_pool_size >= kilo(4));
 	assert(m.table_size     >= kilo(4));
 	assert(m.type_width     >  0);
-	result->table     = mem_alloc(info.backing_table, m.table_size * m.cell_size);
-	slice_assert(result->table);
-	result->cell_pool = mem_alloc(info.backing_cells, m.cell_size  * m.cell_pool_size);
-	slice_assert(result->cell_pool);
+	result->table     = mem_alloc(info.backing_table, m.table_size * m.cell_size);      slice_assert(result->table);
+	result->cell_pool = mem_alloc(info.backing_cells, m.cell_size  * m.cell_pool_size); slice_assert(result->cell_pool);
 	result->table.len = m.table_size; // Setting to the table number of elements instead of byte length.
 }
 void kt1cx_clear(KT1CX_Byte kt, KT1CX_ByteMeta m) {
@@ -1581,38 +1579,38 @@ Str8 str8__fmt_kt1l(AllocatorInfo ainfo, Slice_Byte* _buffer, KT1L_Str8 table, S
 	UTF8* cursor_buffer    = buffer.ptr;
 	SSIZE buffer_remaining = buffer.len;
 
-	char  curr_code  = * fmt_template.ptr;
 	UTF8* cursor_fmt = fmt_template.ptr;
 	SSIZE left_fmt   = fmt_template.len;
 	while (left_fmt && buffer_remaining)
 	{
+		SSIZE copy_offset = 0;
 		// Forward until we hit the delimiter '<' or the template's contents are exhausted.
-		while (curr_code && curr_code != '<' && cursor_fmt != slice_end(fmt_template)) {
-			*  cursor_buffer = * cursor_fmt;
-			++ cursor_buffer;
-			++ cursor_fmt;
-			-- buffer_remaining;
-			-- left_fmt;
-			curr_code = * cursor_fmt;
+		while (cursor_fmt[copy_offset] != cast(UTF8, '<') && (cursor_fmt + copy_offset) != slice_end(fmt_template)) {
+			++ copy_offset;
 		}
-		if (curr_code == '<')
+		memory_copy(cursor_buffer, cursor_fmt, copy_offset);
+		buffer_remaining -= copy_offset;
+		left_fmt         -= copy_offset;
+		cursor_buffer    += copy_offset;
+		cursor_fmt       += copy_offset;
+
+		if (cursor_fmt[0] == '<')
 		{
-			UTF8* cursor_potential_token = cursor_fmt + 1;
-			SSIZE potential_token_length = 0;
+			UTF8* potential_token_cursor = cursor_fmt + 1;
+			SSIZE potential_token_len    = 0;
 			B32   fmt_overflow = false;
 			for (;;) {
-				UTF8* cursor         = cursor_potential_token + potential_token_length;
+				UTF8* cursor         = potential_token_cursor + potential_token_len;
 				fmt_overflow         = cursor >= slice_end(fmt_template);
-				B32 found_terminator = * (cursor_potential_token + potential_token_length) == '>';
+				B32 found_terminator = * (potential_token_cursor + potential_token_len) == '>';
 				if (fmt_overflow || found_terminator) { break; }
-				++ potential_token_length;
+				++ potential_token_len;
 			}
 			if (fmt_overflow) continue;
 			// Hashing the potential token and cross checking it with our token table
-			U64   key   = 0; hash64_djb8(& key, (Slice_Byte){ cast(Byte*, cursor_potential_token), potential_token_length});
+			U64   key   = 0; hash64_djb8(& key, (Slice_Byte){ cast(Byte*, potential_token_cursor), potential_token_len});
 			Str8* value = nullptr;
-			for (slice_iter(table, token))
-			{
+			for (slice_iter(table, token)) {
 				// We do a linear iteration instead of a hash table lookup because the user should be never substiuting with more than 100 unqiue tokens..
 				if (token->key == key) {
 					value = & token->value;
@@ -1622,32 +1620,26 @@ Str8 str8__fmt_kt1l(AllocatorInfo ainfo, Slice_Byte* _buffer, KT1L_Str8 table, S
 			if (value)
 			{
 				// We're going to appending the string, make sure we have enough space in our buffer.
-				if (ainfo.proc != nullptr && (buffer_remaining - potential_token_length) <= 0) {
-					buffer            = mem_grow(ainfo, buffer, buffer.len + potential_token_length);
-					buffer_remaining += potential_token_length;
+				if (ainfo.proc != nullptr && (buffer_remaining - potential_token_len) <= 0) {
+					buffer            = mem_grow(ainfo, buffer, buffer.len + potential_token_len);
+					buffer_remaining += potential_token_len;
 				}
-				SSIZE left         = value->len;
-				U8*   cursor_value = value->ptr;
-
-				while (left && buffer_remaining) {
-					*  cursor_buffer = * cursor_value;
-					++ cursor_buffer;
-					++ cursor_value;
-					-- buffer_remaining;
-					-- left;
-				}
+				assert((buffer_remaining - potential_token_len) > 0);
+				memory_copy(cursor_buffer, value->ptr, value->len);
 				// Sync cursor format to after the processed token
-				cursor_fmt = cursor_potential_token + potential_token_length + 1;
-				curr_code  = * cursor_fmt;
-				left_fmt  -= potential_token_length + 2; // The 2 here are the '<' & '>' delimiters being omitted.
+				cursor_buffer    += value->len;
+				buffer_remaining -= value->len;
+				cursor_fmt        = potential_token_cursor + potential_token_len + 1;
+				left_fmt         -= potential_token_len + 2; // The 2 here are the '<' & '>' delimiters being omitted.
 				continue;
 			}
+			// If not a value, we do a single copy for the '<' and continue.
 			*  cursor_buffer = * cursor_fmt;
 			++ cursor_buffer;
 			++ cursor_fmt;
 			-- buffer_remaining;
 			-- left_fmt;
-			curr_code = * cursor_fmt;
+			continue;
 		}
 	}
 	* _buffer = buffer;
@@ -1829,12 +1821,12 @@ __declspec(dllimport) MS_BOOL __stdcall GetFileSizeEx(MS_HANDLE hFile, MS_LARGE_
 __declspec(dllimport) MS_DWORD __stdcall GetLastError(void);
 
 inline
-FileOpInfo file__read_contents(Str8 path, Opts_read_file_contents* opts) {
+FileOpInfo file__read_contents(Str8 path, Opts_file_read_contents* opts) {
 	assert(opts != nullptr);
 	FileOpInfo result = {0}; api_file_read_contents(& result, path, * opts);
 	return result;
 }
-void api_file_read_contents(FileOpInfo* result, Str8 path, Opts_read_file_contents opts)
+void api_file_read_contents(FileOpInfo* result, Str8 path, Opts_file_read_contents opts)
 {
 	assert(result != nullptr);
 	slice_assert(path);
