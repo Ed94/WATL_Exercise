@@ -44,5 +44,5 @@ $build_args += $flag_dyn_map_calls
 $build_args += $flag_default_allocator_nil
 $build_args += $flag_output_path + $exe
 if ($need_rebuild) { & $odin $build_args }
-pop-location
 & $exe
+pop-location

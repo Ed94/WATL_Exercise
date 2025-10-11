@@ -126,7 +126,7 @@ $compiler_args += ($flag_define + 'BUILD_DEBUG')
 $compiler_args += $flag_debug
 $compiler_args += ( $flag_path_debug + $path_build + '\' )
 # Use the static, multithreaded, debug runtime library
-$compiler_args += $flag_link_win_rt_static_debug
+# $compiler_args += $flag_link_win_rt_static_debug
 
 # Include setup
 $compiler_args += ($flag_include + $path_root)

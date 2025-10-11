@@ -2,7 +2,7 @@
 WATL Exercise
 Version:   0 (From Scratch, 1-Stage Compilation, WinAPI Only, Win CRT Multi-threaded Static Linkage)
 Host:      Windows 11 (x86-64)
-Toolchain: odin-lang/Odin dev-2025-07
+Toolchain: odin-lang/Odin dev-2025-09
 */
 package odin
 
@@ -31,9 +31,9 @@ copy :: proc {
 	slice_copy,
 	string_copy,
 }
-copy_non_overlapping :: proc {
-	memory_copy_non_overlapping,
-	slice_copy_non_overlapping,
+copy_overlapping :: proc {
+	memory_copy_overlapping,
+	slice_copy_overlapping,
 }
 cursor :: proc {
 	ptr_cursor,
@@ -109,14 +109,32 @@ memory_zero_explicit :: proc "contextless" (data: rawptr, len: int) -> rawptr {
 	intrinsics.atomic_thread_fence(.Seq_Cst) // Prevent reordering
 	return data
 }
-memory_copy :: proc "contextless" (dst, src: rawptr, len: int) -> rawptr {
+memory_copy_overlapping :: proc "contextless" (dst, src: rawptr, len: int) -> rawptr {
 	intrinsics.mem_copy(dst, src, len)
 	return dst
 }
-memory_copy_non_overlapping :: proc "contextless" (dst, src: rawptr, len: int) -> rawptr {
+memory_copy :: proc "contextless" (dst, src: rawptr, len: int) -> rawptr {
 	intrinsics.mem_copy_non_overlapping(dst, src, len)
 	return dst
 }
+
+sll_stack_push_n :: proc "contextless" (curr, n, n_link: ^^$Type) {
+    (n_link ^) = (curr ^)
+    (curr   ^) = (n    ^)
+}
+sll_queue_push_nz :: proc "contextless" (first: ^$ParentType, last, n: ^^$Type, nil_val: ^Type) {
+	if (first ^) == nil_val {
+		(first ^) = n^
+		(last  ^) = n^
+		n^.next = nil_val
+	}
+	else {
+		(last ^).next = n^
+		(last ^)      = n^
+		n^.next        = nil_val
+	}
+}
+sll_queue_push_n :: #force_inline proc "contextless" (first: $ParentType, last, n: ^^$Type) { sll_queue_push_nz(first, last, n, nil) }
 
 SliceByte :: struct {
 	data: [^]byte,
@@ -141,35 +159,17 @@ slice_zero :: proc "contextless" (data: $SliceType / []$Type) { memory_zero(raw_
 slice_copy :: proc "contextless" (dst, src: $SliceType / []$Type) -> int {
 	n := max(0, min(len(dst), len(src)))
 	if n > 0 {
-		intrinsics.mem_copy(raw_data(dst), raw_data(src), n * size_of(Type))
-	}
-	return n
-}
-slice_copy_non_overlapping :: proc "contextless" (dst, src: $SliceType / []$Type) -> int {
-	n := max(0, min(len(dst), len(src)))
-	if n > 0 {
 		intrinsics.mem_copy_non_overlapping(raw_data(dst), raw_data(src), n * size_of(Type))
 	}
 	return n
 }
-
-sll_stack_push_n :: proc "contextless" (curr, n, n_link: ^^$Type) {
-    (n_link ^) = (curr ^)
-    (curr   ^) = (n    ^)
-}
-sll_queue_push_nz :: proc "contextless" (first: ^$ParentType, last, n: ^^$Type, nil_val: ^Type) {
-	if (first ^) == nil_val {
-		(first ^) = n^
-		(last  ^) = n^
-		n^.next = nil_val
+slice_copy_overlapping :: proc "contextless" (dst, src: $SliceType / []$Type) -> int {
+	n := max(0, min(len(dst), len(src)))
+	if n > 0 {
+		intrinsics.mem_copy(raw_data(dst), raw_data(src), n * size_of(Type))
 	}
-	else {
-		(last ^).next = n^
-		(last ^)      = n^
-		n^.next        = nil_val
-	}
+	return n
 }
-sll_queue_push_n :: #force_inline proc "contextless" (first: $ParentType, last, n: ^^$Type) { sll_queue_push_nz(first, last, n, nil) }
 //endregion Memory
 
 //region Allocator Interface
@@ -1220,35 +1220,36 @@ str8_fmt_kt1l :: proc(ainfo: AllocatorInfo, _buffer: ^[]byte, table: []KT1L_Slot
 	cursor_buffer    := cursor(buffer)
 	buffer_remaining := len(buffer)
 
-	curr_code  := fmt_template[0]
 	cursor_fmt := cursor(transmute([]u8) fmt_template)
 	left_fmt   := len(fmt_template)
 	for ; left_fmt > 0 && buffer_remaining > 0;
 	{
 		// Forward until we hit the delimiter '<' or the template's contents are exhausted.
-		for ; curr_code != '<' && cursor_fmt != end(fmt_template); {
-			cursor_buffer[0]  = cursor_fmt   [0]
-			cursor_buffer     = cursor_buffer[1:]
-			cursor_fmt        = cursor_fmt   [1:]
-			curr_code         = cursor_fmt   [0]
-			buffer_remaining -= 1
-			left_fmt         -= 1
+		copy_offset : int = 0
+		for ; cursor_fmt[copy_offset] != '<' && cursor_fmt[copy_offset:] != end(fmt_template); {
+			copy_offset += 1
 		}
-		if curr_code == '<'
+		copy(cursor_buffer, cursor_fmt, copy_offset)
+		buffer_remaining -= copy_offset
+		left_fmt         -= copy_offset
+		cursor_buffer     = cursor_buffer[copy_offset:]
+		cursor_fmt        = cursor_fmt   [copy_offset:]
+
+		if cursor_fmt[0] == '<'
 		{
-			cursor_potential_token := cursor_fmt[1:]
-			potential_token_length := 0
+			potential_token_cursor := cursor_fmt[1:]
+			potential_token_len    := 0
 			fmt_overflow           := b32(false)
 			for ;; {
-				cursor      := cursor_potential_token[potential_token_length:]
+				cursor      := potential_token_cursor[potential_token_len:]
 				fmt_overflow = cursor >= end(fmt_template)
-				found_terminator := cast(b32) (cursor_potential_token[potential_token_length] == '>')
+				found_terminator := cast(b32) (potential_token_cursor[potential_token_len] == '>')
 				if fmt_overflow || found_terminator do break
-				potential_token_length += 1
+				potential_token_len += 1
 			}
 			if fmt_overflow do continue
 			// Hashing the potential token and cross checking it with our token table
-			key   : u64     = 0; hash64_djb8(& key, slice(cursor_potential_token, potential_token_length))
+			key   : u64     = 0; hash64_djb8(& key, slice(potential_token_cursor, potential_token_len))
 			value : ^string = nil
 			for & token in table 
 			{
@@ -1261,32 +1262,26 @@ str8_fmt_kt1l :: proc(ainfo: AllocatorInfo, _buffer: ^[]byte, table: []KT1L_Slot
 			if value != nil 
 			{
 				// We're going to appending the string, make sure we have enough space in our buffer.
-				if ainfo.procedure != nil && (buffer_remaining - potential_token_length) <= 0 {
-					buffer            = mem_grow(ainfo, buffer, len(buffer) + potential_token_length)
-					buffer_remaining += potential_token_length
+				if ainfo.procedure != nil && (buffer_remaining - potential_token_len) <= 0 {
+					buffer            = mem_grow(ainfo, buffer, len(buffer) + potential_token_len)
+					buffer_remaining += potential_token_len
 				}
-				left         := len(value)
-				cursor_value := cursor(transmute([]u8) value^)
-				for ; left > 0 && buffer_remaining > 0; {
-					cursor_buffer[0]  = cursor_value [0]
-					cursor_buffer     = cursor_buffer[1:]
-					cursor_value      = cursor_value [1:]
-					cursor_fmt        = cursor_fmt   [1:]
-					buffer_remaining -= 1
-					left             -= 1
-				}
+				assert((buffer_remaining - potential_token_len) > 0)
+				copy(cursor_buffer, cursor(value ^), len(value))
 				// Sync cursor format to after the processed token
-				cursor_fmt = cursor_potential_token[potential_token_length + 1:]
-				curr_code  = cursor_fmt[0]
-				left_fmt  -= potential_token_length + 2 // The 2 here are the '<' & '>' delimiters being omitted.
+				cursor_buffer     = cursor_buffer[len(value):]
+				buffer_remaining -= len(value)
+				cursor_fmt        = potential_token_cursor[potential_token_len + 1:]
+				left_fmt         -= potential_token_len + 2 // The 2 here are the '<' & '>' delimiters being omitted.
 				continue
 			}
+			// If not a subsitution, we do a single copy for the '<' and continue.
 			cursor_buffer[0]  = cursor_fmt   [0]
 			cursor_buffer     = cursor_buffer[1:]
 			cursor_fmt        = cursor_fmt   [1:]
-			curr_code         = cursor_fmt   [0]
 			buffer_remaining -= 1
 			left_fmt         -= 1
+			continue
 		}
 	}
 	_buffer ^ = buffer

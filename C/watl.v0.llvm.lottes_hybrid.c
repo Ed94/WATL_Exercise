@@ -401,7 +401,7 @@ void farena_allocator_proc(AllocatorProc_In in, AllocatorProc_Out_R out);
 #define farena_push_mem(arena, amount, ...) farena__push(arena, amount, 1, opt_args(Opts_farena, lit(stringify(B1)), __VA_ARGS__))
 
 #define farena_push(arena, type, ...) \
-cast(type*R_, farena__push(arena, size_of(type), 1, opt_args(Opts_farena, lit(stringify(type)), __VA_ARGS__))).ptr
+cast(type*, farena__push(arena, size_of(type), 1, opt_args(Opts_farena, lit(stringify(type)), __VA_ARGS__))).ptr
 
 #define farena_push_array(arena, type, amount, ...) \
 (Slice ## type){ farena__push(arena, size_of(type), amount, opt_args(Opts_farena, lit(stringify(type)), __VA_ARGS__)).ptr, amount }
@@ -504,7 +504,7 @@ void arena_allocator_proc(AllocatorProc_In in, AllocatorProc_Out_R out);
 #define arena_push_mem(arena, amount, ...) arena__push(arena, amount, 1, opt_args(Opts_arena, lit(stringify(B1)), __VA_ARGS__))
 
 #define arena_push(arena, type, ...) \
-cast(type*R_, arena__push(arena, 1, size_of(type), opt_args(Opts_arena, lit(stringify(type)), __VA_ARGS__) ).ptr)
+cast(type*, arena__push(arena, 1, size_of(type), opt_args(Opts_arena, lit(stringify(type)), __VA_ARGS__) ).ptr)
 
 #define arena_push_array(arena, type, amount, ...) \
 (tmpl(Slice,type)){ arena__push(arena, size_of(type), amount, opt_args(Opts_arena, lit(stringify(type)), __VA_ARGS__)).ptr, amount }

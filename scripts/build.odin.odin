@@ -85,7 +85,6 @@ msvc_link_default_base_address :: 0x180000000
 //endregion Script Grime
 
 build :: proc(working_dir : string, args : []string) -> (stdout : string, stderr : string) { 
-	fmt.println("Building:", args)
 	res, errs : []byte; _, res, errs, _ = os.process_exec({ working_dir = working_dir, command = args}, context.allocator)
 	return transmute(string)res, transmute(string)errs;
 }
@@ -106,8 +105,8 @@ main :: proc() {
 		file_source,
 		flag_file,
 		join_str(flag_output_path, file_exe),
-		// flag_optimize_none,
-		falg_optimize_aggressive,
+		flag_optimize_none,
+		// falg_optimize_aggressive,
 		flag_default_allocator_nil,
 		flag_debug,
 		flag_microarch_zen5,
@@ -117,6 +116,4 @@ main :: proc() {
 		flag_use_lld,
 		join_str(flag_subsystem, "console"),
 	})
-	fmt.println(res)
-	fmt.println(errs)
 }
