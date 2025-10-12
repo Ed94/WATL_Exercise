@@ -95,25 +95,25 @@ Tera :: Giga * 1024
 
 ptr_cursor :: #force_inline proc "contextless" (ptr: ^$Type) -> [^]Type { return transmute([^]Type) ptr }
 
-align_pow2 :: proc(x: int, b: int) -> int {
+align_pow2 :: #force_inline proc(x: int, b: int) -> int {
     assert(b != 0)
     assert((b & (b - 1)) == 0) // Check power of 2
     return ((x + b - 1) & ~(b - 1))
 }
-memory_zero :: proc "contextless" (data: rawptr, len: int) -> rawptr {
+memory_zero :: #force_inline proc "contextless" (data: rawptr, len: int) -> rawptr {
 	intrinsics.mem_zero(data, len)
 	return data
 }
-memory_zero_explicit :: proc "contextless" (data: rawptr, len: int) -> rawptr {
+memory_zero_explicit :: #force_inline proc "contextless" (data: rawptr, len: int) -> rawptr {
 	intrinsics.mem_zero_volatile(data, len) // Use the volatile mem_zero
 	intrinsics.atomic_thread_fence(.Seq_Cst) // Prevent reordering
 	return data
 }
-memory_copy_overlapping :: proc "contextless" (dst, src: rawptr, len: int) -> rawptr {
+memory_copy_overlapping :: #force_inline proc "contextless" (dst, src: rawptr, len: int) -> rawptr {
 	intrinsics.mem_copy(dst, src, len)
 	return dst
 }
-memory_copy :: proc "contextless" (dst, src: rawptr, len: int) -> rawptr {
+memory_copy :: #force_inline proc "contextless" (dst, src: rawptr, len: int) -> rawptr {
 	intrinsics.mem_copy_non_overlapping(dst, src, len)
 	return dst
 }
@@ -155,15 +155,15 @@ slice_end :: #force_inline proc "contextless" (s : $SliceType / []$Type) -> ^Typ
 @(require_results) slice_to_bytes :: proc "contextless" (s: []$Type) -> []byte         { return ([^]byte)(raw_data(s))[:len(s) * size_of(Type)] }
 @(require_results) slice_raw      :: proc "contextless" (s: []$Type) -> SliceRaw(Type) { return transmute(SliceRaw(Type)) s }
 
-slice_zero :: proc "contextless" (data: $SliceType / []$Type) { memory_zero(raw_data(data), size_of(Type) * len(data)) }
-slice_copy :: proc "contextless" (dst, src: $SliceType / []$Type) -> int {
+slice_zero :: #force_inline proc "contextless" (data: $SliceType / []$Type) { memory_zero(raw_data(data), size_of(Type) * len(data)) }
+slice_copy :: #force_inline proc "contextless" (dst, src: $SliceType / []$Type) -> int {
 	n := max(0, min(len(dst), len(src)))
 	if n > 0 {
 		intrinsics.mem_copy_non_overlapping(raw_data(dst), raw_data(src), n * size_of(Type))
 	}
 	return n
 }
-slice_copy_overlapping :: proc "contextless" (dst, src: $SliceType / []$Type) -> int {
+slice_copy_overlapping :: #force_inline proc "contextless" (dst, src: $SliceType / []$Type) -> int {
 	n := max(0, min(len(dst), len(src)))
 	if n > 0 {
 		intrinsics.mem_copy(raw_data(dst), raw_data(src), n * size_of(Type))
@@ -975,8 +975,7 @@ KT1CX_Cell :: struct($type: typeid, $depth: int) {
 	next:  ^KT1CX_Cell(type, depth),
 }
 KT1CX :: struct($cell: typeid / KT1CX_Cell($type, $depth)) {
-	cell_pool: []cell,
-	table:     []cell,
+	table: []cell,
 }
 KT1CX_Byte_Slot :: struct {
 	key:      u64,
@@ -986,8 +985,7 @@ KT1CX_Byte_Cell :: struct {
 	next: ^byte,
 }
 KT1CX_Byte :: struct {
-	cell_pool: []byte,
-	table:     []byte,
+	table: []byte,
 }
 KT1CX_ByteMeta :: struct {
 	slot_size:        int,
@@ -1021,10 +1019,8 @@ kt1cx_init :: proc(info: KT1CX_Info, m: KT1CX_InfoMeta, result: ^KT1CX_Byte) {
 	assert(m.cell_pool_size >= 4 * Kilo)
 	assert(m.table_size     >= 4 * Kilo)
 	assert(m.type_width     >  0)
-	table_raw       := transmute(SliceByte) mem_alloc(info.backing_table, m.table_size * m.cell_size)
+	table_raw := transmute(SliceByte) mem_alloc(info.backing_table, m.table_size * m.cell_size)
 	slice_assert(transmute([]byte) table_raw)
-	result.cell_pool = mem_alloc(info.backing_cells, m.cell_size * m.cell_pool_size)
-	slice_assert(result.cell_pool)
 	table_raw.len = m.table_size
 	result.table  = transmute([]byte) table_raw
 }
@@ -1126,10 +1122,11 @@ kt1cx_set :: proc(kt: KT1CX_Byte, key: u64, value: []byte, backing_cells: Alloca
 	}
 }
 kt1cx_assert :: proc(kt: $type / KT1CX) {
-	slice_assert(kt.cell_pool)
 	slice_assert(kt.table)
 }
-kt1cx_byte :: proc(kt: $type / KT1CX) -> KT1CX_Byte { return { slice_to_bytes(kt.cell_pool), slice( transmute([^]byte) cursor(kt.table), len(kt.table)) } }
+kt1cx_byte :: proc(kt: $type / KT1CX) -> KT1CX_Byte { return { 
+	slice( transmute([^]byte) cursor(kt.table), len(kt.table)) 
+} }
 //endregion Key Table 1-Layer Chained-Chunked-Cells (KT1CX)
 
 //region String Operations

@@ -464,10 +464,9 @@ def_struct(tmpl(KT1CX_Cell,type)) {    \
 	tmpl(KT1CX_Slot,type)  slots[depth]; \
 	tmpl(KT1CX_Cell,type)* next;         \
 }
-#define def_KT1CX(type)                  \
-def_struct(tmpl(KT1CX,type)) {           \
-	tmpl(Slice_KT1CX_Cell,type) cell_pool; \
-	tmpl(Slice_KT1CX_Cell,type) table;     \
+#define def_KT1CX(type)              \
+def_struct(tmpl(KT1CX,type)) {       \
+	tmpl(Slice_KT1CX_Cell,type) table; \
 }
 typedef def_struct(KT1CX_Byte_Slot) {
 	U64   key;
@@ -478,7 +477,6 @@ typedef def_struct(KT1CX_Byte_Cell) {
 	Byte* next;
 };
 typedef def_struct(KT1CX_Byte) {
-	Slice_Byte cell_pool;
 	Slice_Byte table;
 };
 typedef def_struct(KT1CX_ByteMeta) {
@@ -511,11 +509,10 @@ U64   kt1cx_slot_id(KT1CX_Byte kt,  U64 key, KT1CX_ByteMeta meta);
 Byte* kt1cx_get    (KT1CX_Byte kt,  U64 key, KT1CX_ByteMeta meta);
 Byte* kt1cx_set    (KT1CX_Byte kt,  U64 key, Slice_Byte value, AllocatorInfo backing_cells, KT1CX_ByteMeta meta);
 
-#define kt1cx_assert(kt) do {   \
-	slice_assert(kt.cell_pool); \
+#define kt1cx_assert(kt) do { \
 	slice_assert(kt.table);     \
 } while(0)
-#define kt1cx_byte(kt) (KT1CX_Byte){slice_byte(kt.cell_pool), { cast(Byte*, kt.table.ptr), kt.table.len } }
+#define kt1cx_byte(kt) (KT1CX_Byte){ { cast(Byte*, kt.table.ptr), kt.table.len } }
 #pragma endregion KT1CX
 
 #pragma region String Operations
@@ -1389,8 +1386,7 @@ void kt1cx_init(KT1CX_Info info, KT1CX_InfoMeta m, KT1CX_Byte* result) {
 	assert(m.cell_pool_size >= kilo(4));
 	assert(m.table_size     >= kilo(4));
 	assert(m.type_width     >  0);
-	result->table     = mem_alloc(info.backing_table, m.table_size * m.cell_size);      slice_assert(result->table);
-	result->cell_pool = mem_alloc(info.backing_cells, m.cell_size  * m.cell_pool_size); slice_assert(result->cell_pool);
+	result->table     = mem_alloc(info.backing_table, m.table_size * m.cell_size); slice_assert(result->table);
 	result->table.len = m.table_size; // Setting to the table number of elements instead of byte length.
 }
 void kt1cx_clear(KT1CX_Byte kt, KT1CX_ByteMeta m) {

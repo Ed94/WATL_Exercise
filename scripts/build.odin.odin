@@ -106,6 +106,8 @@ main :: proc() {
 		flag_file,
 		join_str(flag_output_path, file_exe),
 		flag_optimize_none,
+		// flag_optimize_minimal,
+		// flag_optimize_speed,
 		// falg_optimize_aggressive,
 		flag_default_allocator_nil,
 		flag_debug,
