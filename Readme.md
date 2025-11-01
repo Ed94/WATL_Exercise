@@ -34,6 +34,8 @@ Embeddable scripting languages will be embedded as they should be.
 
 * Fix large-pages not working (at least on my system).
 
+Goals:
+
 * [x] Single-threaded C example
 * [] Multi-threaded C example
 * [] Add basic timing benchmark to C examples

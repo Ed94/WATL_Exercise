@@ -274,7 +274,7 @@ mem_alloc :: proc(ainfo: AllocatorInfo, size: int, alignment: int = MEMORY_ALIGN
 	ainfo.procedure(input, & output)
 	return output.allocation
 }
-mem_grow :: proc(ainfo: AllocatorInfo, mem: []byte, size: int, alignment: int = MEMORY_ALIGNMENT_DEFAULT, no_zero: b32 = false) -> []byte {
+mem_grow :: proc(ainfo: AllocatorInfo, mem: []byte, size: int, alignment: int = MEMORY_ALIGNMENT_DEFAULT, no_zero: b32 = false, give_actual: b32 = false) -> []byte {
 	assert(ainfo.procedure != nil)
 	input := AllocatorProc_In {
 		data           = ainfo.data,
@@ -285,9 +285,9 @@ mem_grow :: proc(ainfo: AllocatorInfo, mem: []byte, size: int, alignment: int = 
 	}
 	output: AllocatorProc_Out
 	ainfo.procedure(input, & output)
-	return output.allocation
+	return slice(cursor(output.allocation), give_actual ? len(output.allocation) : size)
 }
-mem_resize :: proc(ainfo: AllocatorInfo, mem: []byte, size: int, alignment: int = MEMORY_ALIGNMENT_DEFAULT, no_zero: b32 = false) -> []byte {
+mem_resize :: proc(ainfo: AllocatorInfo, mem: []byte, size: int, alignment: int = MEMORY_ALIGNMENT_DEFAULT, no_zero: b32 = false, give_actual: b32 = false) -> []byte {
 	assert(ainfo.procedure != nil)
 	input := AllocatorProc_In {
 		data           = ainfo.data,
@@ -298,7 +298,7 @@ mem_resize :: proc(ainfo: AllocatorInfo, mem: []byte, size: int, alignment: int 
 	}
 	output: AllocatorProc_Out
 	ainfo.procedure(input, & output)
-	return output.allocation
+	return slice(cursor(output.allocation), give_actual ? len(output.allocation) : size)
 }
 mem_shrink :: proc(ainfo: AllocatorInfo, mem: []byte, size: int, alignment: int = MEMORY_ALIGNMENT_DEFAULT, no_zero: b32 = false) -> []byte {
 	assert(ainfo.procedure != nil)
@@ -913,54 +913,33 @@ arena_ainfo :: #force_inline proc "contextless" (arena : ^Arena) -> AllocatorInf
 //endregion Arena (Casey-Ryan Composite Arena)
 
 //region Hashing
-hash64_djb8 :: proc(hash: ^u64, bytes: []byte) {
-	for elem in bytes {
-		hash^ = ((hash^ << 8) + hash^) + u64(elem)
-	}
+// Ripped from core:hash, fnv64a
+@(optimization_mode="favor_size")
+hash64_fnv1a :: #force_inline proc "contextless" (hash: ^u64, data: []byte, seed := u64(0xcbf29ce484222325)) {
+	hash^ = seed; for b in data { hash^ = (hash^ ~ u64(b)) * 0x100000001b3 }
 }
 //endregion Hashing
 
 //region Key Table 1-Layer Linear (KT1L)
-KT1L_Slot :: struct($Type: typeid) {
+KTL_Slot :: struct($Type: typeid) {
 	key:   u64,
 	value: Type,
 }
-KT1L_Meta :: struct {
-	slot_size:       uintptr,
-	kt_value_offset: uintptr,
-	type_width:      uintptr,
+KTL_Meta :: struct {
+	slot_size:       int,
+	kt_value_offset: int,
+	type_width:      int,
 	type:            typeid,
 }
-kt1l_populate_slice_a2_Slice_Byte :: proc(kt: ^[]byte, backing: AllocatorInfo, values: []byte, num_values: int, m: KT1L_Meta) {
+ktl_populate_slice_a2_str :: #force_inline proc(kt: ^[]KTL_Slot(string), backing: AllocatorInfo, values: [][2]string) {
 	assert(kt != nil)
-	if num_values == 0 { return }
-	table_size_bytes := num_values * int(m.slot_size)
-	kt^               = mem_alloc(backing, table_size_bytes)
-	slice_assert(kt ^)
-	kt_raw : SliceByte = transmute(SliceByte) kt^
-	for id in 0 ..< cast(uintptr) num_values {
-		slot_offset := id * m.slot_size                                     // slot id
-		slot_cursor := kt_raw.data[slot_offset:]                            // slots[id]            type: KT1L_<Type>
-		slot_key    := cast(^u64) slot_cursor                               // slots[id].key        type: U64
-		slot_value  := slice(slot_cursor[m.kt_value_offset:], m.type_width) // slots[id].value      type: <Type>
-		a2_offset   := id * m.type_width * 2                                // a2 entry id
-		a2_cursor   := cursor(values)[a2_offset:]                           // a2_entries[id]       type: A2_<Type>
-		a2_key      := (transmute(^[]byte) a2_cursor) ^                     // a2_entries[id].key   type: <Type>
-		a2_value    := slice(a2_cursor[m.type_width:], m.type_width)        // a2_entries[id].value type: <Type>
-		copy(slot_value, a2_value)                                          // slots[id].value = a2_entries[id].value
-		slot_key^ = 0; hash64_djb8(slot_key, a2_key)                        // slots[id].key   = hash64_djb8(a2_entries[id].key)
+	if len(values) == 0 { return }
+	raw_bytes := mem_alloc(backing, size_of(KTL_Slot(string)) * len(values));
+	kt^        = slice( transmute([^]KTL_Slot(string)) cursor(raw_bytes), len(raw_bytes) / size_of(KTL_Slot(string)) )
+	for id in 0 ..< len(values) {
+		memory_copy(& kt[id].value, & values[id][1], size_of(string))
+		hash64_fnv1a(& kt[id].key, transmute([]byte) values[id][0])
 	}
-	kt_raw.len = num_values
-}
-kt1l_populate_slice_a2 :: proc($Type: typeid, kt: ^[]KT1L_Slot(Type), backing: AllocatorInfo, values: [][2]Type) {
-	assert(kt != nil)
-	values_bytes := slice(transmute([^]u8) raw_data(values), len(values) * size_of([2]Type))
-	kt1l_populate_slice_a2_Slice_Byte(transmute(^[]byte) kt, backing, values_bytes, len(values), {
-		slot_size       = size_of(KT1L_Slot(Type)),
-		kt_value_offset = offset_of(KT1L_Slot(Type), value),
-		type_width      = size_of(Type),
-		type            = Type,
-	})
 }
 //endregion Key Table 1-Layer Linear (KT1L)
 
@@ -1206,7 +1185,7 @@ str8_from_u32 :: proc(ainfo: AllocatorInfo, num: u32, radix: u32 = 10, min_digit
 	return result
 }
 
-str8_fmt_kt1l :: proc(ainfo: AllocatorInfo, _buffer: ^[]byte, table: []KT1L_Slot(string), fmt_template: string) -> string {
+str8_fmt_kt1l :: proc(ainfo: AllocatorInfo, _buffer: ^[]byte, table: []KTL_Slot(string), fmt_template: string) -> string {
 	buffer := _buffer^
 	slice_assert(buffer)
 	slice_assert(table)
@@ -1246,7 +1225,7 @@ str8_fmt_kt1l :: proc(ainfo: AllocatorInfo, _buffer: ^[]byte, table: []KT1L_Slot
 			}
 			if fmt_overflow do continue
 			// Hashing the potential token and cross checking it with our token table
-			key   : u64     = 0; hash64_djb8(& key, slice(potential_token_cursor, potential_token_len))
+			key   : u64     = 0; hash64_fnv1a(& key, slice(potential_token_cursor, potential_token_len))
 			value : ^string = nil
 			for & token in table 
 			{
@@ -1287,7 +1266,7 @@ str8_fmt_kt1l :: proc(ainfo: AllocatorInfo, _buffer: ^[]byte, table: []KT1L_Slot
 }
 
 str8_fmt_backed :: proc(tbl_ainfo, buf_ainfo: AllocatorInfo, fmt_template: string, entries: [][2]string) -> string {
-	kt: []KT1L_Slot(string); kt1l_populate_slice_a2(string, & kt, tbl_ainfo, entries)
+	kt: []KTL_Slot(string); ktl_populate_slice_a2_str(& kt, tbl_ainfo, entries)
 	buf_size := Kilo * 64
 	buffer   := mem_alloc(buf_ainfo, buf_size)
 	result   := str8_fmt_kt1l(buf_ainfo, & buffer, kt, fmt_template)
@@ -1296,7 +1275,7 @@ str8_fmt_backed :: proc(tbl_ainfo, buf_ainfo: AllocatorInfo, fmt_template: strin
 str8_fmt_tmp :: proc(fmt_template: string, entries: [][2]string) -> string {
 	@static tbl_mem: [Kilo * 32]byte; tbl_arena := farena_make(tbl_mem[:])
 	@static buf_mem: [Kilo * 64]byte; buffer := buf_mem[:]
-	kt: []KT1L_Slot(string); kt1l_populate_slice_a2(string, & kt, ainfo(& tbl_arena), entries)
+	kt: []KTL_Slot(string); ktl_populate_slice_a2_str(& kt, ainfo(& tbl_arena), entries)
 	result := str8_fmt_kt1l({}, & buffer, kt, fmt_template)
 	return result
 }
@@ -1391,7 +1370,7 @@ str8cache_set :: proc(kt: KT1CX_Str8, key: u64, value: string, str_reserve, cell
 }
 cache_str8 :: proc(cache: ^Str8Cache, str: string) -> string {
 	assert(cache != nil)
-	key: u64 = 0; hash64_djb8(& key, transmute([]byte) str)
+	key: u64 = 0; hash64_fnv1a(& key, transmute([]byte) str)
 	result  := str8cache_set(cache.kt, key, str, cache.str_reserve, cache.cell_reserve)
 	return result ^
 }
@@ -1420,12 +1399,12 @@ str8gen_append_str8 :: proc(gen: ^Str8Gen, str: string) {
 	to_copy := slice(cursor(result)[gen.len:], len(result) - gen.len)
 	copy(to_copy, transmute([]byte) str)
 	gen.ptr = transmute(^u8) raw_data(result)
-	gen.len = len(result)
-	gen.cap = max(gen.len, gen.cap) // TODO(Ed): Arenas currently hide total capacity before growth. Problably better todo classic append to actually track this.
+	gen.len = len(str) + gen.len
+	gen.cap = len(result)
 }
 str8gen_append_fmt :: proc(gen: ^Str8Gen, fmt_template: string, tokens: [][2]string) {
 	@static tbl_mem: [Kilo * 32]byte; tbl_arena := farena_make(tbl_mem[:])
-	kt: []KT1L_Slot(string); kt1l_populate_slice_a2(string, & kt, ainfo(& tbl_arena), tokens)
+	kt: []KTL_Slot(string); ktl_populate_slice_a2_str(& kt, ainfo(& tbl_arena), tokens)
 	buffer := slice(gen.ptr[gen.len:], gen.cap - gen.len)
 	if len(buffer) < Kilo * 16 {
 		result := mem_grow(gen.backing, str8gen_to_bytes(gen ^), Kilo * 16 + gen.cap)
