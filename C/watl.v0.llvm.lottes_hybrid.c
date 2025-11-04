@@ -251,7 +251,7 @@ typedef def_Slice(B1);
 #define slice_to_bytes(slice) ((Slice_B1){cast(B1*, (slice).ptr), (slice).len * size_of_slice_type(slice)})
 #define slice_fmem(mem)       slice_mem(u8_(mem), size_of(mem))
 
-finline void slice__zero(Slice_B1 mem, U8 typewidth) { slice_assert(mem); memory_zero(u8_(mem.ptr), mem.len); }
+finline void slice__zero(Slice_B1 mem, U8 typewidth) { slice_assert(mem); mem_zero(u8_(mem.ptr), mem.len); }
 #define slice_zero(slice) slice__zero(slice_mem_s(slice), size_of_slice_type(slice))
 
 finline
@@ -259,7 +259,7 @@ void slice__copy(Slice_B1 dest, U8 dest_typewidth, Slice_B1 src, U8 src_typewidt
 	assert(dest.len >= src.len);
 	slice_assert(dest);
 	slice_assert(src);
-	memory_copy(u8_(dest.ptr), u8_(src.ptr), src.len);
+	mem_copy(u8_(dest.ptr), u8_(src.ptr), src.len);
 }
 #define slice_copy(dest, src) do {       \
 	static_assert(typeof_same(dest, src)); \
@@ -898,7 +898,7 @@ void farena_init(FArena_R arena, Slice_Mem mem) {
 }
 finline FArena farena_make(Slice_Mem mem) { FArena a; farena_init(& a, mem); return a; }
 inline
-Slice_Mem farena__push(FArena_R arena, U8 amount, U8 type_width, Opts__farena*R_ opts) {
+Slice_Mem farena__push(FArena_R arena, U8 amount, U8 type_width, Opts_farena*R_ opts) {
 	assert(opts != nullptr);
 	if (amount == 0) { return (Slice_Mem){}; }
 	U8 desired   = type_width * amount;
@@ -910,14 +910,12 @@ Slice_Mem farena__push(FArena_R arena, U8 amount, U8 type_width, Opts__farena*R_
 }
 inline
 Slice_Mem farena__grow(FArena_R arena, Slice_Mem old_allocation, U8 requested_size, U8 alignment, B4 should_zero) {
-	Slice_Mem result;
 	// Check if the allocation is at the end of the arena
 	U8 alloc_end = old_allocation.ptr + old_allocation.len;
 	U8 arena_end = arena->start + arena->used;
 	if (alloc_end != arena_end) {
 		// Not at the end, can't grow in place
-		result = (Slice_Mem){0};
-		return;
+		return (Slice_Mem){0};
 	}
 	// Calculate growth
 	U8 grow_amount  = requested_size - old_allocation.len;
@@ -925,29 +923,27 @@ Slice_Mem farena__grow(FArena_R arena, Slice_Mem old_allocation, U8 requested_si
 	U8 unused       = arena->capacity - arena->used;
 	if (aligned_grow > unused) {
 		// Not enough space
-		result = (Slice_Mem){0};
-		return;
+		return (Slice_Mem){0};
 	}
 	arena->used += aligned_grow;
-	result = (Slice_Mem){ old_allocation.ptr, aligned_grow + requested_size };
-	memory_zero(old_allocation.ptr + old_allocation.len, grow_amount * cast(U8, should_zero));
+	Slice_Mem result = (Slice_Mem){ old_allocation.ptr, aligned_grow + requested_size };
+	mem_zero(old_allocation.ptr + old_allocation.len, grow_amount * cast(U8, should_zero));
+	return result;
 }
 inline
 Slice_Mem farena__shrink(FArena_R arena, Slice_Mem old_allocation, U8 requested_size, U8 alignment)
 {
-	Slice_Mem result;
 	// Check if the allocation is at the end of the arena
 	U8 alloc_end = old_allocation.ptr + old_allocation.len;
 	U8 arena_end = arena->start + arena->used;
 	if (alloc_end != arena_end) {
 		// Not at the end, can't shrink but return adjusted size
-		result = (Slice_Mem){old_allocation.ptr, requested_size};
-		return;
+		return (Slice_Mem){old_allocation.ptr, requested_size};
 	}
 	U8 aligned_original = align_pow2(old_allocation.len, MEMORY_ALIGNMENT_DEFAULT);
 	U8 aligned_new      = align_pow2(requested_size, alignment ? alignment : MEMORY_ALIGNMENT_DEFAULT);
 	arena->used    -= (aligned_original - aligned_new);
-	result = (Slice_Mem){old_allocation.ptr, requested_size};
+	return (Slice_Mem){old_allocation.ptr, requested_size};
 }
 finline void farena_reset(FArena_R arena) { arena->used = 0; }
 finline
@@ -970,7 +966,7 @@ void farena_allocator_proc(AllocatorProc_In in, AllocatorProc_Out*R_ out)
 		case AllocatorOp_Alloc:
 		case AllocatorOp_Alloc_NoZero:
 			out->allocation = farena_push_mem(arena, in.requested_size, .alignment = in.alignment);
-			memory_zero(out->allocation.ptr, out->allocation.len * in.op);
+			mem_zero(out->allocation.ptr, out->allocation.len * in.op);
 		break;
 
 		case AllocatorOp_Free:                       break;
@@ -1116,7 +1112,7 @@ VArena* varena__make(Opts_varena_make*R_ opts) {
 	U8 base           = os_vmem_reserve(reserve_size, .base_addr = opts->base_addr, .no_large_pages = no_large_pages); 
 	assert(base != 0);
 	os_vmem_commit(base, commit_size, .no_large_pages = no_large_pages);
-	U8 header_size = varena__header_size();
+	U8 header_size = varena_header_size();
 	VArena* vm = cast(VArena*, base); r_(vm)[0] = (VArena){
 		.reserve_start = base + header_size,
 		.reserve       = reserve_size,
@@ -1157,13 +1153,12 @@ Slice_Mem varena__push(VArena_R vm, U8 amount, U8 type_width, Opts_varena*R_ opt
 }
 inline
 Slice_Mem varena__grow(VArena_R vm, Slice_Mem old_allocation, U8 requested_size, U8 alignment, B4 no_zero) {
-	Slice_Mem result;
 	U8 grow_amount = requested_size - old_allocation.len;
-	if (grow_amount == 0) { result =  old_allocation; return result; }           // Growing when not the last allocation not allowed
-	U8 current_offset = vm->reserve_start + vm->commit_used;                     assert(old_allocation.ptr == current_offset); 
-	Slice_Mem allocation = varena_push_mem(vm, grow_amount, alignment);          assert(allocation.ptr != 0);
-	result = (Slice_Mem){ old_allocation.ptr, requested_size + allocation.len }; 
-	memory_zero(result.ptr, result.len * no_zero);
+	if (grow_amount == 0) { return old_allocation; }                    // Growing when not the last allocation not allowed
+	U8 current_offset = vm->reserve_start + vm->commit_used;            assert(old_allocation.ptr == current_offset); 
+	Slice_Mem allocation = varena_push_mem(vm, grow_amount, alignment); assert(allocation.ptr != 0);
+	Slice_Mem result     = (Slice_Mem){ old_allocation.ptr, requested_size + allocation.len }; 
+	mem_zero(result.ptr, result.len * no_zero);
 	return result;
 }
 finline void varena_release(VArena_R arena) { os_vmem_release(u8_(arena), arena->reserve); }
@@ -1190,7 +1185,7 @@ void varena_allocator_proc(AllocatorProc_In in, AllocatorProc_Out* out)
 		case AllocatorOp_Alloc:
 		case AllocatorOp_Alloc_NoZero:
 			out->allocation = varena_push_mem(vm, in.requested_size, .alignment = in.alignment);
-			memory_zero(out->allocation.ptr, out->allocation.len * in.op);
+			mem_zero(out->allocation.ptr, out->allocation.len * in.op);
 		break;
 
 		case AllocatorOp_Free:                       break; 
@@ -1309,7 +1304,7 @@ void arena_allocator_proc(AllocatorProc_In in, AllocatorProc_Out*R_ out)
 	case AllocatorOp_Alloc:
 	case AllocatorOp_Alloc_NoZero:
 		out->allocation = arena_push_mem(arena, in.requested_size, .alignment = in.alignment);
-		memory_zero(out->allocation.ptr, out->allocation.len * in.op);
+		mem_zero(out->allocation.ptr, out->allocation.len * in.op);
 	break;
 
 	case AllocatorOp_Free:                      break;
@@ -1331,7 +1326,7 @@ void arena_allocator_proc(AllocatorProc_In in, AllocatorProc_Out*R_ out)
 				{
 					active->pos          += aligned_grow;
 					out->allocation       = (Slice_Mem){in.old_allocation.ptr, in.requested_size};
-					memory_zero(in.old_allocation.ptr + in.old_allocation.len, grow_amount * in.op - AllocatorOp_Grow_NoZero);
+					mem_zero(in.old_allocation.ptr + in.old_allocation.len, grow_amount * in.op - AllocatorOp_Grow_NoZero);
 					break;
 				}
 			}
@@ -1341,8 +1336,8 @@ void arena_allocator_proc(AllocatorProc_In in, AllocatorProc_Out*R_ out)
 			out->allocation = (Slice_Mem){0};
 			break;
 		}
-		memory_copy(new_alloc.ptr, in.old_allocation.ptr, in.old_allocation.len);
-		memory_zero(new_alloc.ptr + in.old_allocation.len, (in.requested_size - in.old_allocation.len) * in.op - AllocatorOp_Grow_NoZero);
+		mem_copy(new_alloc.ptr, in.old_allocation.ptr, in.old_allocation.len);
+		mem_zero(new_alloc.ptr + in.old_allocation.len, (in.requested_size - in.old_allocation.len) * in.op - AllocatorOp_Grow_NoZero);
 		out->allocation       = new_alloc;
 	}
 	break;
@@ -1360,7 +1355,7 @@ void arena_allocator_proc(AllocatorProc_In in, AllocatorProc_Out*R_ out)
 		U8 aligned_new      = align_pow2(in.requested_size, in.alignment ? in.alignment : MEMORY_ALIGNMENT_DEFAULT);
 		U8 pos_reduction    = aligned_original - aligned_new;
 		active->pos        -= pos_reduction;
-		varena__shrink(active->backing, in.old_allocation, in.requested_size, &(Opts_varena){.alignment = in.alignment});
+		varena__shrink(active->backing, in.old_allocation, in.requested_size);
 		out->allocation = (Slice_Mem){in.old_allocation.ptr, in.requested_size};
 	}
 	break;
@@ -1391,7 +1386,7 @@ void ktl_populate_slice_a2_str8(KTL_Str8*R_ kt, AllocatorInfo backing, Slice_A2_
 	if (values.len == 0) return;
 	* kt = alloc_slice(backing, KTL_Slot_Str8, values.len);
 	for span_iter(U8, id, 0, <, values.len) { 
-		memory_copy(u8_(& kt->ptr[id.cursor].value), u8_(& values.ptr[id.cursor][1]), size_of(Str8));
+		mem_copy(u8_(& kt->ptr[id.cursor].value), u8_(& values.ptr[id.cursor][1]), size_of(Str8));
 		hash64_fnv1a(& kt->ptr[id.cursor].key, slice_mem_s(values.ptr[id.cursor][0]));
 	}
 }
@@ -1421,7 +1416,7 @@ void kt1cx_clear(KT1CX_Byte kt, KT1CX_ByteMeta m) {
 		for (; slot_cursor < slice_end(slots); slot_cursor += m.slot_size) {
 		process_slots:
 			Slice_Mem slot = {slot_cursor, m.slot_size}; // slot = slots[id]
-			memory_zero(slot.ptr, slot.len);             // clear(slot)
+			mem_zero(slot.ptr, slot.len);                // clear(slot)
 		}
 		U8 next = slot_cursor + m.cell_next_offset; // next = slots + next_cell_offset
 		if (next != null) {
@@ -1508,7 +1503,7 @@ U8 kt1cx_set(KT1CX_Byte kt, U8 key, Slice_Mem value, AllocatorInfo backing_cells
 finline
 char* str8_to_cstr_capped(Str8 content, Slice_Mem mem) {
 	U8 copy_len = min(content.len, mem.len - 1);
-	memory_copy(mem.ptr, u8_(content.ptr), copy_len);
+	mem_copy(mem.ptr, u8_(content.ptr), copy_len);
 	u1_r(mem.ptr)[copy_len] = '\0';
 	return cast(char*, mem.ptr);
 }
@@ -1608,7 +1603,7 @@ Str8 str8__fmt_ktl(AllocatorInfo ainfo, Slice_Mem*R_ _buffer, KTL_Str8 table, St
 		while (cursor_fmt[copy_offset] != '<' && (cursor_fmt + copy_offset) < slice_end(fmt_template)) {
 			++ copy_offset;
 		}
-		memory_copy(u8_(cursor_buffer), u8_(cursor_fmt), copy_offset);
+		mem_copy(u8_(cursor_buffer), u8_(cursor_fmt), copy_offset);
 		buffer_remaining -= copy_offset;
 		left_fmt         -= copy_offset;
 		cursor_buffer    += copy_offset;
@@ -1646,7 +1641,7 @@ Str8 str8__fmt_ktl(AllocatorInfo ainfo, Slice_Mem*R_ _buffer, KTL_Str8 table, St
 					buffer_remaining += potential_token_len;
 				}
 				assert((buffer_remaining - potential_token_len) > 0);
-				memory_copy(u8_(cursor_buffer), u8_(value->ptr), value->len);
+				mem_copy(u8_(cursor_buffer), u8_(value->ptr), value->len);
 				// Sync cursor format to after the processed token
 				cursor_buffer    += value->len;
 				buffer_remaining -= value->len;
@@ -1885,7 +1880,7 @@ void api_file_read_contents(FileOpInfo_R result, Str8 path, Opts_read_file_conte
 		return;
 	}
 	if (opts.zero_backing) {
-		memory_zero(buffer.ptr, buffer.len);
+		mem_zero(buffer.ptr, buffer.len);
 	}
 	MS_DWORD amount_read = 0;
 	MS_BOOL  read_result = ReadFile(
