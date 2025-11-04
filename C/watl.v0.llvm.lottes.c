@@ -464,6 +464,126 @@ cast(type*, farena__push(arena, size_of(type), 1, opt_args(Opts_farena, __VA_ARG
 (Slice ## type){ farena__push(arena, size_of(type), amount, opt_args(Opts_farena, __VA_ARGS__)).ptr, amount }
 #pragma endregion FArena
 
+#pragma region OS
+typedef def_struct(OS_SystemInfo) { U8 target_page_size; };
+typedef def_struct(Opts_vmem)     { U8 base_addr; B4 no_large_pages; A4_B1 _PAD_; };
+
+#define MS_INVALID_HANDLE_VALUE            ((MS_HANDLE)(S8)-1)
+#define MS_ANYSIZE_ARRAY                   1
+#define MS_MEM_COMMIT                      0x00001000
+#define MS_MEM_RESERVE                     0x00002000
+#define MS_MEM_LARGE_PAGES                 0x20000000
+#define MS_PAGE_READWRITE                  0x04
+#define MS_TOKEN_ADJUST_PRIVILEGES         (0x0020)
+#define MS_SE_PRIVILEGE_ENABLED            (0x00000002L)
+#define MS_TOKEN_QUERY                     (0x0008)
+#define MS__TEXT(quote)                    L ## quote
+#define MS_TEXT(quote)                     MS__TEXT(quote)
+#define MS_SE_LOCK_MEMORY_NAME             MS_TEXT("SeLockMemoryPrivilege")
+
+typedef int              MS_BOOL;
+typedef unsigned long    MS_DWORD;
+typedef MS_DWORD*        MS_PDWORD;
+typedef void*            MS_HANDLE;
+typedef MS_HANDLE*       MS_PHANDLE;
+typedef long             MS_LONG;
+typedef S8               MS_LONGLONG;
+typedef char const*      MS_LPCSTR;
+typedef unsigned short*  MS_LPWSTR, *MS_PWSTR;
+typedef void*            MS_LPVOID;
+typedef MS_DWORD*        MS_LPDWORD;
+typedef U8               MS_ULONG_PTR, *MS_PULONG_PTR;
+typedef void const*      MS_LPCVOID;
+typedef struct MS_SECURITY_ATTRIBUTES *MS_PSECURITY_ATTRIBUTES, *MS_LPSECURITY_ATTRIBUTES;
+typedef struct MS_OVERLAPPED          *MS_LPOVERLAPPED;
+typedef def_union(MS_LARGE_INTEGER)        { struct { MS_DWORD LowPart; MS_LONG HighPart; } _; struct { MS_DWORD LowPart; MS_LONG HighPart; } u; MS_LONGLONG QuadPart; };
+typedef def_struct(MS_FILE)                { void* _Placeholder; };
+typedef def_struct(MS_SECURITY_ATTRIBUTES) { MS_DWORD  nLength; A4_B1 _PAD_; MS_LPVOID lpSecurityDescriptor; MS_BOOL bInheritHandle; };
+typedef def_struct(MS_OVERLAPPED)          { MS_ULONG_PTR Internal; MS_ULONG_PTR InternalHigh; union { struct { MS_DWORD Offset; MS_DWORD OffsetHigh; } _; void* Pointer; } _; MS_HANDLE  hEvent; };
+typedef struct MS_LUID*                    MS_PLUID;
+typedef struct MS_LUID_AND_ATTRIBUTES*     MS_PLUID_AND_ATTRIBUTES;
+typedef struct MS_TOKEN_PRIVILEGES*        MS_PTOKEN_PRIVILEGES;
+typedef def_struct(MS_LUID)                { MS_DWORD LowPart;        MS_LONG HighPart; };
+typedef def_struct(MS_LUID_AND_ATTRIBUTES) { MS_LUID  Luid;           MS_DWORD Attributes; };
+typedef def_struct(MS_TOKEN_PRIVILEGES)    { MS_DWORD PrivilegeCount; MS_LUID_AND_ATTRIBUTES Privileges[MS_ANYSIZE_ARRAY]; };
+
+W_ MS_BOOL   CloseHandle(MS_HANDLE hObject);
+W_ MS_BOOL   AdjustTokenPrivileges(MS_HANDLE TokenHandle, MS_BOOL DisableAllPrivileges, MS_PTOKEN_PRIVILEGES NewState, MS_DWORD BufferLength, MS_PTOKEN_PRIVILEGES PreviousState, MS_PDWORD ReturnLength);
+W_ MS_HANDLE GetCurrentProcess(void);
+W_ U8        GetLargePageMinimum(void);
+W_ MS_BOOL   LookupPrivilegeValueW(MS_LPWSTR lpSystemName, MS_LPWSTR lpName, MS_PLUID lpLuid);
+W_ MS_BOOL   OpenProcessToken(MS_HANDLE ProcessHandle, MS_DWORD DesiredAccess, MS_PHANDLE TokenHandle);
+W_ MS_LPVOID VirtualAlloc(MS_LPVOID lpAddress, U8 dwSize, MS_DWORD flAllocationType, MS_DWORD flProtect);
+W_ MS_BOOL   VirtualFree (MS_LPVOID lpAddress, U8 dwSize, MS_DWORD dwFreeType);
+
+typedef def_struct(OS_Windows_State) { OS_SystemInfo system_info; };
+global OS_Windows_State os__windows_info;
+
+I_ OS_SystemInfo* os_system_info(void);
+I_ void           os_init(void);
+
+I_ U8 os__vmem_reserve__u(U8 size, U8 opts_addr);
+I_ B4 os__vmem_commit__u (U8 vm, U8 size, U8 opts_addr);
+I_ void os_vmem_release__u(U8 vm, U8 size);
+
+I_ U8 os__vmem_reserve(U8 size, Opts_vmem_R opts);
+I_ B4 os__vmem_commit (U8 vm, U8 size, Opts_vmem_R opts);
+I_ void os_vmem_release(U8 vm, U8 size);
+
+#define os_vmem_reserve(size, ...)    os__vmem_reserve(size, opt_args(Opts_vmem, __VA_ARGS__))
+#define os_vmem_commit(vm, size, ...) os__vmem_commit (vm, size, opt_args(Opts_vmem, __VA_ARGS__))
+#pragma endregion OS
+
+#pragma region VArena (Virtual Address Space Arena)
+typedef Opts_farena Opts_varena;
+typedef def_enum(U4, VArenaFlags) {
+	VArenaFlag_NoLargePages = (1 << 0),
+};
+typedef def_struct(VArena) {
+	U8 reserve_start;
+	U8 reserve;
+	U8 commit_size;
+	U8 committed;
+	U8 commit_used;
+	VArenaFlags flags;
+};
+typedef def_struct(Opts_varena_make) {
+	U8 base_addr;
+	U8 reserve_size;
+	U8 commit_size;
+	VArenaFlags flags;
+};
+
+I_ U8   varena__make__u (Opts_varena_make_R opts);
+I_ void varena_release__u(U8 arena);
+I_ void varena_reset__u  (U8 arena);
+I_ void varena_rewind__u (U8 arena, U8 sp_type_sig, U8 sp_slot);
+I_ void varena_save__u   (U8 arena, U8 sp_addr);
+void    varena__push__u  (U8 arena, U8 amount, U8 type_width, U8 alignment, U8 slice_addr);
+void    varena__grow__u  (U8 result, U8 arena, U8 old_ptr, U8 old_len, U8 requested_size, U8 alignment, B4 should_zero);
+void    varena__shrink__u(U8 result, U8 arena, U8 old_ptr, U8 old_len, U8 requested_size, U8 alignment);
+
+VArena*      varena__make (Opts_varena_make*R_ opts);
+Slice_Mem    varena__push (VArena_R arena, U8 amount, U8 type_width, Opts_varena*R_ opts);
+void         varena_release(VArena_R arena);
+void         varena_reset  (VArena_R arena);
+void         varena_rewind (VArena_R arena, AllocatorSP save_point);
+Slice_Mem    varena__shrink(VArena_R arena, Slice_Mem old_allocation, U8 requested_size, Opts_varena*R_ opts);
+AllocatorSP  varena_save   (VArena_R arena);
+
+void varena_allocator_proc(U8 data, U8 requested_size, U8 alignment, U8 old_ptr, U8 old_len, U4 op, /*AllocatorProc_Out*/U8 out);
+
+#define ainfo_varena(arena) (AllocatorInfo){ .proc = varena_allocator_proc, .data = u8_(arena) }
+
+#define varena_push_mem(arena, amount, ...) varena__push(arena, amount, 1, opt_args(Opts_varena, __VA_ARGS__))
+
+#define varena_push(arena, type, ...) \
+cast(type*, varena__push(arena, size_of(type), 1, opt_args(Opts_varena, __VA_ARGS__)).ptr)
+
+#define varena_push_array(arena, type, amount, ...) \
+(tmpl(Slice,type)){ varena__push(arena, size_of(type), amount, opt_args(Opts_varena, __VA_ARGS__)).ptr, amount }
+#pragma endregion VArena
+
 #pragma endregion Header
 
 #pragma region Implementation
@@ -663,6 +783,276 @@ void farena_allocator_proc(U8 arena, U8 requested_size, U8 alignment, U8 old_ptr
 	return;
 }
 #pragma endregion FArena
+
+#pragma region OS
+I_ OS_SystemInfo* os_system_info(void) {
+	return & os__windows_info.system_info;
+}
+I_ void os__enable_large_pages(void) {
+	MS_HANDLE token;
+	if (OpenProcessToken(GetCurrentProcess(), MS_TOKEN_ADJUST_PRIVILEGES | MS_TOKEN_QUERY, & token)) {
+		MS_LUID luid;
+		if (LookupPrivilegeValueW(0, MS_SE_LOCK_MEMORY_NAME, & luid)) {
+			MS_TOKEN_PRIVILEGES priv;
+			priv.PrivilegeCount           = 1;
+			priv.Privileges[0].Luid       = luid;
+			priv.Privileges[0].Attributes = MS_SE_PRIVILEGE_ENABLED;
+			AdjustTokenPrivileges(token, 0, & priv, size_of(priv), 0, 0);
+		}
+		CloseHandle(token);
+	}
+}
+I_ void os_init(void) {
+	os__enable_large_pages();
+	os_system_info()->target_page_size = GetLargePageMinimum();
+}
+I_ U8 os__vmem_reserve__u(U8 size, U8 opts_addr) {
+	Opts_vmem_R opts = cast(Opts_vmem_R, opts_addr); assert(opts != nullptr);
+	MS_LPVOID base = VirtualAlloc(cast(MS_LPVOID, opts->base_addr), size, MS_MEM_RESERVE,
+		MS_PAGE_READWRITE /* | (opts->no_large_pages ? 0 : MS_MEM_LARGE_PAGES) */);
+	return u8_(base);
+}
+I_ B4   os__vmem_commit__u(U8 vm, U8 size, U8 opts_addr) { return VirtualAlloc(cast(MS_LPVOID, vm), size, MS_MEM_COMMIT, MS_PAGE_READWRITE) != nullptr; }
+I_ void os_vmem_release__u(U8 vm, U8 size)               { VirtualFree(cast(MS_LPVOID, vm), 0, MS_MEM_RESERVE); }
+
+I_ U8   os__vmem_reserve(       U8 size, Opts_vmem_R opts) { return os__vmem_reserve__u(    size, u8_(opts)); }
+I_ B4   os__vmem_commit (U8 vm, U8 size, Opts_vmem_R opts) { return os__vmem_commit__u (vm, size, u8_(opts)); }
+I_ void os_vmem_release (U8 vm, U8 size)                   { os_vmem_release__u(vm, size); }
+#pragma endregion OS
+
+#pragma region VArena (Virtual Address Space Arena)
+I_ U8 varena__header_size(void) { return align_pow2(size_of(VArena), MEMORY_ALIGNMENT_DEFAULT); }
+
+I_ U8 varena__make__u(Opts_varena_make_R opts) {
+	assert(opts != nullptr);
+	if (opts->reserve_size == 0) { opts->reserve_size = mega(64); }
+	if (opts->commit_size  == 0) { opts->commit_size  = mega(64); }
+	U8 reg page       = os_system_info()->target_page_size;
+	U8 reg reserve_sz = align_pow2(opts->reserve_size, page);
+	U8 reg commit_sz  = align_pow2(opts->commit_size,  page);
+	U8 base           = os_vmem_reserve(reserve_sz, .base_addr = opts->base_addr, .no_large_pages = no_large);
+	assert(base != 0);
+	B4 reg no_large   = (opts->flags & VArenaFlag_NoLargePages) != 0;
+	B4 ok         = os_vmem_commit(base, commit_sz, .no_large_pages = no_large);
+	assert(ok != 0);
+	U8 header     = varena__header_size();
+	U8 data_start = base + header;
+	u8_r(base + offset_of(VArena, reserve_start))[0] = data_start;
+	u8_r(base + offset_of(VArena, reserve      ))[0] = reserve_sz;
+	u8_r(base + offset_of(VArena, commit_size  ))[0] = commit_sz;
+	u8_r(base + offset_of(VArena, committed    ))[0] = commit_sz;
+	u8_r(base + offset_of(VArena, commit_used  ))[0] = header;
+	u4_r(base + offset_of(VArena, flags        ))[0] = opts->flags;
+	return base;
+}
+
+I_ void varena_release__u(U8 arena) {
+	if (arena == null) { return; }
+	os_vmem_release__u(arena, u8_r(arena + offset_of(VArena, reserve))[0]);
+}
+
+I_ void varena_reset__u(U8 arena) {
+	if (arena == null) { return; }
+	u8_r(arena + offset_of(VArena, commit_used))[0] = 0;
+}
+
+I_ void varena_rewind__u(U8 arena, U8 sp_type_sig, U8 sp_slot) {
+	if (arena == null) { return; }
+	assert(sp_type_sig == (U8) varena_allocator_proc);
+	U8 header = varena__header_size();
+	if (sp_slot < header) { sp_slot = header; }
+	u8_r(arena + offset_of(VArena, commit_used))[0] = sp_slot;
+}
+
+I_ void varena_save__u(U8 arena, U8 sp_addr) {
+	if (sp_addr == null) { return; }
+	u8_r(sp_addr + offset_of(AllocatorSP, type_sig))[0] = (U8) varena_allocator_proc;
+	u8_r(sp_addr + offset_of(AllocatorSP, slot    ))[0] = u8_r(arena + offset_of(VArena, commit_used))[0];
+}
+
+void varena__push__u(U8 arena, U8 amount, U8 type_width, U8 alignment, U8 result) {
+	if (result == null || arena == null) { return; }
+	if (amount == 0) { struct_zero(Slice_Mem, result); return; }
+	U8 reg align          = alignment ? alignment : MEMORY_ALIGNMENT_DEFAULT;
+	U8 reg requested_size = amount * type_width;
+	U8 reg aligned_size   = align_pow2(requested_size, align);
+	U8 reg reserve_start  = u8_r(arena + offset_of(VArena, reserve_start))[0];
+	U8_R reg commit_used  = u8_r(arena + offset_of(VArena, commit_used));
+	U8 reg current_offset = reserve_start + commit_used[0];
+	U8 reg reserve_total  = u8_r(arena + offset_of(VArena, reserve))[0];
+	U8 reg reserve_left   = reserve_total - commit_used[0];
+	if (aligned_size > reserve_left) { struct_zero(Slice_Mem, result); return; }
+	U8 reg committed      = u8_r(arena + offset_of(VArena, committed))[0];
+	U8 reg commit_size    = u8_r(arena + offset_of(VArena, commit_size))[0];
+	U8 reg commit_left    = committed - commit_used[0];
+	if (commit_left < aligned_size) {
+		U8 reg next_commit = reserve_left > aligned_size ? max(commit_size, aligned_size) : reserve_left;
+		if (next_commit != 0) {
+			B4 no_large = (u4_r(arena + offset_of(VArena, flags))[0] & VArenaFlag_NoLargePages) != 0;
+			U8 reg next_commit_start = arena + committed;
+			if (! os_vmem_commit(next_commit_start, next_commit, .no_large_pages = no_large)) {
+				struct_zero(Slice_Mem, result);
+				return;
+			}
+			committed += next_commit;
+			u8_r(arena + offset_of(VArena, committed))[0] = committed;
+		}
+	}
+	commit_used[0] += aligned_size;
+	struct_copy(Slice_Mem, result, (U8)& slice_mem(current_offset, requested_size));
+}
+
+void varena__grow__u(U8 result, U8 arena, U8 old_ptr, U8 old_len, U8 requested_size, U8 alignment, B4 should_zero) {
+	if (result == null || arena == null) { return; }
+	if (old_ptr == 0 || requested_size <= old_len) {
+		struct_copy(Slice_Mem, result, (U8)& slice_mem(old_ptr, requested_size));
+		return;
+	}
+	U8_R reg commit_used = u8_r(arena + offset_of(VArena, commit_used));
+	U8 reg reserve_start = u8_r(arena + offset_of(VArena, reserve_start))[0];
+	U8 reg current_offset = reserve_start + commit_used[0];
+	if (old_ptr + old_len != current_offset) {
+		struct_zero(Slice_Mem, result);
+		return;
+	}
+	U8 reg grow_amount = requested_size - old_len;
+	uvar(Slice_Mem, extra) = {0};
+	varena__push__u(arena, grow_amount, 1, alignment, u8_(extra));
+	U8 extra_ptr = u8_r(extra + offset_of(Slice_Mem, ptr))[0];
+	U8 extra_len = u8_r(extra + offset_of(Slice_Mem, len))[0];
+	if (extra_ptr == 0) {
+		struct_zero(Slice_Mem, result);
+		return;
+	}
+	U8 reg new_len = old_len + extra_len;
+	struct_copy(Slice_Mem, result, (U8)& slice_mem(old_ptr, new_len));
+	if (should_zero && grow_amount != 0) {
+		memory_zero(old_ptr + old_len, grow_amount);
+	}
+}
+
+void varena__shrink__u(U8 result, U8 arena, U8 old_ptr, U8 old_len, U8 requested_size, U8 alignment) {
+	if (result == null || arena == null) { return; }
+	if (old_ptr == 0 || requested_size >= old_len) {
+		struct_copy(Slice_Mem, result, (U8)& slice_mem(old_ptr, min(requested_size, old_len)));
+		return;
+	}
+	U8_R reg commit_used = u8_r(arena + offset_of(VArena, commit_used));
+	U8 reg reserve_start = u8_r(arena + offset_of(VArena, reserve_start))[0];
+	U8 reg current_offset = reserve_start + commit_used[0];
+	if (old_ptr + old_len != current_offset) {
+		struct_copy(Slice_Mem, result, (U8)& slice_mem(old_ptr, requested_size));
+		return;
+	}
+	U8 reg aligned_original = align_pow2(old_len, MEMORY_ALIGNMENT_DEFAULT);
+	U8 reg aligned_new      = align_pow2(requested_size, alignment ? alignment : MEMORY_ALIGNMENT_DEFAULT);
+	if (aligned_new > aligned_original) { aligned_new = aligned_original; }
+	commit_used[0] -= (aligned_original - aligned_new);
+	struct_copy(Slice_Mem, result, (U8)& slice_mem(old_ptr, requested_size));
+}
+
+VArena* varena__make(Opts_varena_make* opts) {
+	return cast(VArena*, varena__make__u(opts));
+}
+
+Slice_Mem varena__push(VArena_R arena, U8 amount, U8 type_width, Opts_varena* opts) {
+	Slice_Mem result;
+	varena__push__u(u8_(arena), amount, type_width, opts ? opts->alignment : 0, u8_(& result));
+	return result;
+}
+
+void varena_release(VArena_R arena) { varena_release__u(u8_(arena)); }
+void varena_reset  (VArena_R arena) { varena_reset__u  (u8_(arena)); }
+
+void varena_rewind(VArena_R arena, AllocatorSP save_point) {
+	varena_rewind__u(u8_(arena), u8_(save_point.type_sig), save_point.slot);
+}
+
+Slice_Mem varena__shrink(VArena_R arena, Slice_Mem old_allocation, U8 requested_size, Opts_varena* opts) {
+	Slice_Mem result;
+	varena__shrink__u(u8_(& result), u8_(arena), old_allocation.ptr, old_allocation.len, requested_size, opts ? opts->alignment : 0);
+	return result;
+}
+
+AllocatorSP varena_save(VArena_R arena) {
+	AllocatorSP sp;
+	varena_save__u(u8_(arena), u8_(& sp));
+	return sp;
+}
+
+void varena_allocator_proc(U8 arena, U8 requested_size, U8 alignment, U8 old_ptr, U8 old_len, U4 op, U8 out_addr)
+{
+	AllocatorProc_Out* out = cast(AllocatorProc_Out*, out_addr);
+	U8 allocation_addr = out_addr ? out_addr + offset_of(AllocatorProc_Out, allocation) : 0;
+	if (arena == null) {
+		if (allocation_addr) { struct_zero(Slice_Mem, allocation_addr); }
+		return;
+	}
+	switch (op)
+	{
+	case AllocatorOp_Alloc:
+	case AllocatorOp_Alloc_NoZero:
+		if (allocation_addr) {
+			varena__push__u(arena, requested_size, 1, alignment, allocation_addr);
+			if (op == AllocatorOp_Alloc) {
+				U8 ptr = u8_r(allocation_addr + offset_of(Slice_Mem, ptr))[0];
+				U8 len = u8_r(allocation_addr + offset_of(Slice_Mem, len))[0];
+				if (ptr && len) { memory_zero(ptr, len); }
+			}
+		}
+		break;
+
+	case AllocatorOp_Free:
+		break;
+
+	case AllocatorOp_Reset:
+		varena_reset__u(arena);
+		break;
+
+	case AllocatorOp_Grow:
+	case AllocatorOp_Grow_NoZero:
+		if (allocation_addr) {
+			varena__grow__u(allocation_addr, arena, old_ptr, old_len, requested_size, alignment, op - AllocatorOp_Grow_NoZero);
+		}
+		break;
+
+	case AllocatorOp_Shrink:
+		if (allocation_addr) {
+			varena__shrink__u(allocation_addr, arena, old_ptr, old_len, requested_size, alignment);
+		}
+		break;
+
+	case AllocatorOp_Rewind:
+		varena_rewind__u(arena, old_ptr, old_len);
+		break;
+
+	case AllocatorOp_SavePoint:
+		if (out_addr) { varena_save__u(arena, out_addr + offset_of(AllocatorProc_Out, save_point)); }
+		break;
+
+	case AllocatorOp_Query:
+		if (out_addr) {
+			u4_r(out_addr + offset_of(AllocatorQueryInfo, features))[0] =
+			  AllocatorQuery_Alloc
+			| AllocatorQuery_Reset
+			| AllocatorQuery_Resize
+			| AllocatorQuery_Rewind;
+			U8 reserve = u8_r(arena + offset_of(VArena, reserve))[0];
+			U8 committed = u8_r(arena + offset_of(VArena, committed))[0];
+			U8 max_alloc = (reserve > committed) ? (reserve - committed) : 0;
+			u8_r(out_addr + offset_of(AllocatorQueryInfo, max_alloc))[0] = max_alloc;
+			u8_r(out_addr + offset_of(AllocatorQueryInfo, min_alloc))[0] = kilo(4);
+			u8_r(out_addr + offset_of(AllocatorQueryInfo, left     ))[0] = max_alloc;
+			AllocatorSP sp = { .type_sig = varena_allocator_proc, .slot = u8_r(arena + offset_of(VArena, commit_used))[0] };
+			struct_copy(AllocatorSP, out_addr + offset_of(AllocatorQueryInfo, save_point), (U8)& sp);
+		}
+		break;
+
+	default:
+		break;
+	}
+}
+#pragma endregion VArena
 
 #pragma endregion Implementation
 
