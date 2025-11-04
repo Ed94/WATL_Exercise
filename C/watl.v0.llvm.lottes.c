@@ -440,7 +440,7 @@ typedef def_struct(FArena) {
 };
 
 I_ void farena_init__u  (U8 arena, U8 mem_ptr, U8 mem_len);
-   void farena__push__u (U8 arena, U8 amount, U8 type_width, U8 alignment, U8 slice_mem);
+   void farena__push__u (U8 arena, U8 amount, U8 type_width, U8 alignment, U8 slice_addr);
 I_ void farena_reset__u (U8 arena);
 I_ void farena_rewind__u(U8 arena, U8 sp_type_sig, U8 sp_slot);
 I_ void farena_save__u  (U8 arena, U8 sp);
@@ -520,15 +520,15 @@ typedef def_struct(OS_Windows_State) { OS_SystemInfo system_info; };
 global OS_Windows_State os__windows_info;
 
 I_ OS_SystemInfo* os_system_info(void);
-I_ void           os_init(void);
+I_ void           os_init       (void);
 
-I_ U8 os__vmem_reserve__u(U8 size, U8 opts_addr);
-I_ B4 os__vmem_commit__u (U8 vm, U8 size, U8 opts_addr);
-I_ void os_vmem_release__u(U8 vm, U8 size);
+I_ U8   os__vmem_reserve__u(       U8 size, U8 opts_addr);
+I_ B4   os__vmem_commit__u (U8 vm, U8 size, U8 opts_addr);
+I_ void os_vmem_release__u (U8 vm, U8 size);
 
-I_ U8 os__vmem_reserve(U8 size, Opts_vmem_R opts);
-I_ B4 os__vmem_commit (U8 vm, U8 size, Opts_vmem_R opts);
-I_ void os_vmem_release(U8 vm, U8 size);
+I_ U8   os__vmem_reserve(       U8 size, Opts_vmem_R opts);
+I_ B4   os__vmem_commit (U8 vm, U8 size, Opts_vmem_R opts);
+I_ void os_vmem_release (U8 vm, U8 size);
 
 #define os_vmem_reserve(size, ...)    os__vmem_reserve(size, opt_args(Opts_vmem, __VA_ARGS__))
 #define os_vmem_commit(vm, size, ...) os__vmem_commit (vm, size, opt_args(Opts_vmem, __VA_ARGS__))
@@ -554,17 +554,17 @@ typedef def_struct(Opts_varena_make) {
 	VArenaFlags flags;
 };
 
-I_ U8   varena__make__u (Opts_varena_make_R opts);
+I_ U8   varena__make__u  (U8 reserve_size, U8 commit_size, U8 flags, U8 base_addr);
 I_ void varena_release__u(U8 arena);
 I_ void varena_reset__u  (U8 arena);
-I_ void varena_rewind__u (U8 arena, U8 sp_type_sig, U8 sp_slot);
-I_ void varena_save__u   (U8 arena, U8 sp_addr);
-void    varena__push__u  (U8 arena, U8 amount, U8 type_width, U8 alignment, U8 slice_addr);
-void    varena__grow__u  (U8 result, U8 arena, U8 old_ptr, U8 old_len, U8 requested_size, U8 alignment, B4 should_zero);
-void    varena__shrink__u(U8 result, U8 arena, U8 old_ptr, U8 old_len, U8 requested_size, U8 alignment);
+I_ void varena_rewind__u (U8 arena,  U8 sp_type_sig, U8 sp_slot);
+I_ void varena_save__u   (U8 arena,  U8 sp_addr);
+   void varena__push__u  (U8 arena,  U8 amount, U8 type_width, U8 alignment, U8 slice_addr);
+   void varena__grow__u  (U8 result, U8 arena,  U8 old_ptr, U8 old_len, U8 requested_size, U8 alignment, B4 should_zero);
+   void varena__shrink__u(U8 result, U8 arena,  U8 old_ptr, U8 old_len, U8 requested_size, U8 alignment);
 
-VArena*      varena__make (Opts_varena_make*R_ opts);
-Slice_Mem    varena__push (VArena_R arena, U8 amount, U8 type_width, Opts_varena*R_ opts);
+VArena*      varena__make  (Opts_varena_make*R_ opts);
+Slice_Mem    varena__push  (VArena_R arena, U8 amount, U8 type_width, Opts_varena*R_ opts);
 void         varena_release(VArena_R arena);
 void         varena_reset  (VArena_R arena);
 void         varena_rewind (VArena_R arena, AllocatorSP save_point);
@@ -821,76 +821,45 @@ I_ void os_vmem_release (U8 vm, U8 size)                   { os_vmem_release__u(
 #pragma endregion OS
 
 #pragma region VArena (Virtual Address Space Arena)
-I_ U8 varena__header_size(void) { return align_pow2(size_of(VArena), MEMORY_ALIGNMENT_DEFAULT); }
+I_ U8 varena_header_size(void) { return align_pow2(size_of(VArena), MEMORY_ALIGNMENT_DEFAULT); }
 
-I_ U8 varena__make__u(Opts_varena_make_R opts) {
-	assert(opts != nullptr);
-	if (opts->reserve_size == 0) { opts->reserve_size = mega(64); }
-	if (opts->commit_size  == 0) { opts->commit_size  = mega(64); }
+I_ U8 varena__make__u(U8 reserve_size, U8 commit_size, U8 flags, U8 base_addr) {
+	if (reserve_size == 0) { reserve_size = mega(64); }
+	if (commit_size  == 0) { commit_size  = mega(64); }
 	U8 reg page       = os_system_info()->target_page_size;
-	U8 reg reserve_sz = align_pow2(opts->reserve_size, page);
-	U8 reg commit_sz  = align_pow2(opts->commit_size,  page);
-	U8 base           = os_vmem_reserve(reserve_sz, .base_addr = opts->base_addr, .no_large_pages = no_large);
-	assert(base != 0);
-	B4 reg no_large   = (opts->flags & VArenaFlag_NoLargePages) != 0;
-	B4 ok         = os_vmem_commit(base, commit_sz, .no_large_pages = no_large);
-	assert(ok != 0);
-	U8 header     = varena__header_size();
+	U8 reg reserve_sz = align_pow2(reserve_size, page);
+	U8 reg commit_sz  = align_pow2(commit_size,  page);
+	B4 reg no_large   = (flags & VArenaFlag_NoLargePages) != 0;
+	U8 base       = os_vmem_reserve__u(reserve_sz, base_addr, no_large); assert(base != 0);
+	B4 ok         = os_vmem_commit__u(base, commit_sz, no_large);	       assert(ok   != 0);
+	U8 header     = varena_header_size();
 	U8 data_start = base + header;
 	u8_r(base + offset_of(VArena, reserve_start))[0] = data_start;
 	u8_r(base + offset_of(VArena, reserve      ))[0] = reserve_sz;
 	u8_r(base + offset_of(VArena, commit_size  ))[0] = commit_sz;
 	u8_r(base + offset_of(VArena, committed    ))[0] = commit_sz;
 	u8_r(base + offset_of(VArena, commit_used  ))[0] = header;
-	u4_r(base + offset_of(VArena, flags        ))[0] = opts->flags;
+	u4_r(base + offset_of(VArena, flags        ))[0] = flags;
 	return base;
 }
-
-I_ void varena_release__u(U8 arena) {
-	if (arena == null) { return; }
-	os_vmem_release__u(arena, u8_r(arena + offset_of(VArena, reserve))[0]);
-}
-
-I_ void varena_reset__u(U8 arena) {
-	if (arena == null) { return; }
-	u8_r(arena + offset_of(VArena, commit_used))[0] = 0;
-}
-
-I_ void varena_rewind__u(U8 arena, U8 sp_type_sig, U8 sp_slot) {
-	if (arena == null) { return; }
-	assert(sp_type_sig == (U8) varena_allocator_proc);
-	U8 header = varena__header_size();
-	if (sp_slot < header) { sp_slot = header; }
-	u8_r(arena + offset_of(VArena, commit_used))[0] = sp_slot;
-}
-
-I_ void varena_save__u(U8 arena, U8 sp_addr) {
-	if (sp_addr == null) { return; }
-	u8_r(sp_addr + offset_of(AllocatorSP, type_sig))[0] = (U8) varena_allocator_proc;
-	u8_r(sp_addr + offset_of(AllocatorSP, slot    ))[0] = u8_r(arena + offset_of(VArena, commit_used))[0];
-}
-
 void varena__push__u(U8 arena, U8 amount, U8 type_width, U8 alignment, U8 result) {
 	if (result == null || arena == null) { return; }
-	if (amount == 0) { struct_zero(Slice_Mem, result); return; }
-	U8 reg align          = alignment ? alignment : MEMORY_ALIGNMENT_DEFAULT;
-	U8 reg requested_size = amount * type_width;
-	U8 reg aligned_size   = align_pow2(requested_size, align);
-	U8 reg reserve_start  = u8_r(arena + offset_of(VArena, reserve_start))[0];
-	U8_R reg commit_used  = u8_r(arena + offset_of(VArena, commit_used));
-	U8 reg current_offset = reserve_start + commit_used[0];
-	U8 reg reserve_total  = u8_r(arena + offset_of(VArena, reserve))[0];
-	U8 reg reserve_left   = reserve_total - commit_used[0];
+	if (amount == 0)                     { struct_zero(Slice_Mem, result); return; }
+	U8   reg align          = alignment ? alignment : MEMORY_ALIGNMENT_DEFAULT;
+	U8   reg requested_size = amount * type_width;
+	U8   reg aligned_size   = align_pow2(requested_size, align);
+	U8_R reg commit_used    = u8_r(arena + offset_of(VArena, commit_used  ));
+	U8   reg reserve_left   = u8_r(arena + offset_of(VArena, reserve      ))[0] - commit_used[0];
 	if (aligned_size > reserve_left) { struct_zero(Slice_Mem, result); return; }
-	U8 reg committed      = u8_r(arena + offset_of(VArena, committed))[0];
-	U8 reg commit_size    = u8_r(arena + offset_of(VArena, commit_size))[0];
-	U8 reg commit_left    = committed - commit_used[0];
+	U8 reg committed   = u8_r(arena + offset_of(VArena, committed  ))[0];
+	U8 reg commit_left = committed - commit_used[0];
 	if (commit_left < aligned_size) {
+		U8 reg commit_size = u8_r(arena + offset_of(VArena, commit_size))[0];
 		U8 reg next_commit = reserve_left > aligned_size ? max(commit_size, aligned_size) : reserve_left;
 		if (next_commit != 0) {
 			B4 no_large = (u4_r(arena + offset_of(VArena, flags))[0] & VArenaFlag_NoLargePages) != 0;
 			U8 reg next_commit_start = arena + committed;
-			if (! os_vmem_commit(next_commit_start, next_commit, .no_large_pages = no_large)) {
+			if (os_vmem_commit(next_commit_start, next_commit, .no_large_pages = no_large) == false) {
 				struct_zero(Slice_Mem, result);
 				return;
 			}
@@ -898,10 +867,11 @@ void varena__push__u(U8 arena, U8 amount, U8 type_width, U8 alignment, U8 result
 			u8_r(arena + offset_of(VArena, committed))[0] = committed;
 		}
 	}
-	commit_used[0] += aligned_size;
-	struct_copy(Slice_Mem, result, (U8)& slice_mem(current_offset, requested_size));
+	commit_used[0] += aligned_size; {
+		U8 reg current_offset = u8_r(arena + offset_of(VArena, reserve_start))[0] + commit_used[0];
+		struct_copy(Slice_Mem, result, (U8)& slice_mem(current_offset, requested_size));
+	}
 }
-
 void varena__grow__u(U8 result, U8 arena, U8 old_ptr, U8 old_len, U8 requested_size, U8 alignment, B4 should_zero) {
 	if (result == null || arena == null) { return; }
 	if (old_ptr == 0 || requested_size <= old_len) {
@@ -931,6 +901,27 @@ void varena__grow__u(U8 result, U8 arena, U8 old_ptr, U8 old_len, U8 requested_s
 	}
 }
 
+I_ void varena_release__u(U8 arena) {
+	if (arena == null) { return; }
+	os_vmem_release__u(arena, u8_r(arena + offset_of(VArena, reserve))[0]);
+}
+I_ void varena_reset__u(U8 arena) {
+	if (arena == null) { return; }
+	u8_r(arena + offset_of(VArena, commit_used))[0] = 0;
+}
+I_ void varena_rewind__u(U8 arena, U8 sp_type_sig, U8 sp_slot) {
+	if (arena == null) { return; }
+	assert(sp_type_sig == (U8) varena_allocator_proc);
+	U8 header = varena__header_size();
+	if (sp_slot < header) { sp_slot = header; }
+	u8_r(arena + offset_of(VArena, commit_used))[0] = sp_slot;
+}
+I_ void varena_save__u(U8 arena, U8 sp_addr) {
+	if (sp_addr == null) { return; }
+	u8_r(sp_addr + offset_of(AllocatorSP, type_sig))[0] = (U8) varena_allocator_proc;
+	u8_r(sp_addr + offset_of(AllocatorSP, slot    ))[0] = u8_r(arena + offset_of(VArena, commit_used))[0];
+}
+
 void varena__shrink__u(U8 result, U8 arena, U8 old_ptr, U8 old_len, U8 requested_size, U8 alignment) {
 	if (result == null || arena == null) { return; }
 	if (old_ptr == 0 || requested_size >= old_len) {
@@ -951,8 +942,9 @@ void varena__shrink__u(U8 result, U8 arena, U8 old_ptr, U8 old_len, U8 requested
 	struct_copy(Slice_Mem, result, (U8)& slice_mem(old_ptr, requested_size));
 }
 
-VArena* varena__make(Opts_varena_make* opts) {
-	return cast(VArena*, varena__make__u(opts));
+I_ VArena* varena__make(Opts_varena_make* opts) {
+	assert(opts != nullptr);
+	return cast(VArena*, varena__make__u(opts->reserve_size, opts->commit_size, opts->flags, opts->base_addr));
 }
 
 Slice_Mem varena__push(VArena_R arena, U8 amount, U8 type_width, Opts_varena* opts) {

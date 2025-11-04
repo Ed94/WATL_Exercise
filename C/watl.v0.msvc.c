@@ -25,6 +25,7 @@ Toolchain: MSVC 19.43, C-Stanard: 11
 #define local_persist                       static
 #define global                              static
 #define internal                            static
+#define finline                             __forceinline
 
 #define static_assert                       _Static_assert
 #define typeof                              __typeof__
@@ -56,6 +57,12 @@ enum { false = 0, true  = 1, true_overflow, };
 #define nullptr                             cast(void*, 0)
 #define offset_of(type, member)             cast(SSIZE, & (((type*) 0)->member))
 #define size_of(data)                       cast(SSIZE, sizeof(data))
+
+#define R_                                  __restrict  
+#define V_                                  volatile
+#define r_(ptr)                             cast(typeof_ptr(ptr)*R_, ptr)
+#define v_(ptr)                             cast(typeof_ptr(ptr)*V_, ptr)
+#define ssize(value)                        cast(SSIZE, value)
 
 #define kilo(n)                             (cast(SSIZE, n) << 10)
 #define mega(n)                             (cast(SSIZE, n) << 20)
@@ -106,11 +113,8 @@ inline SSIZE align_pow2(SSIZE x, SSIZE b);
 #define align_struct(type_width) ((SSIZE)(((type_width) + 7) / 8 * 8))
 
 #define assert_bounds(point, start, end) do { \
-	SSIZE pos_point = cast(SSIZE, point); \
-	SSIZE pos_start = cast(SSIZE, start); \
-	SSIZE pos_end   = cast(SSIZE, end);   \
-	assert(pos_start <= pos_point);       \
-	assert(pos_point <= pos_end);         \
+	assert(ssize(start) <= ssize(point));       \
+	assert(ssize(point) <= ssize(end));         \
 } while(0)
 
 void* memory_copy            (void* restrict dest, void const* restrict src, USIZE length);
@@ -833,18 +837,16 @@ Slice_Byte farena__push(FArena* arena, SSIZE amount, SSIZE type_width, Opts_fare
 	}
 	SSIZE desired   = type_width * amount;
 	SSIZE to_commit = align_pow2(desired, opts->alignment ?  opts->alignment : MEMORY_ALIGNMENT_DEFAULT);
-	SSIZE unused    = arena->capacity - arena->used;
-	assert(to_commit <= unused);
-	Byte* ptr    = cast(Byte*, cast(SSIZE, arena->start) + arena->used);
-	arena->used +=  to_commit;
+	SSIZE unused    = arena->capacity - arena->used; assert(to_commit <= unused);
+	Byte* ptr       = cast(Byte*, cast(SSIZE, arena->start) + arena->used);
+	arena->used    +=  to_commit;
 	return (Slice_Byte){ptr, desired};
 }
 inline void farena_reset(FArena* arena) { arena->used = 0; }
 inline
 void farena_rewind(FArena* arena, AllocatorSP save_point) {
 	assert(save_point.type_sig == & farena_allocator_proc);
-	Byte* end = cast(Byte*, cast(SSIZE, arena->start) + arena->used);
-	assert_bounds(save_point.slot, arena->start, end);
+	Byte* end    = cast(Byte*, cast(SSIZE, arena->start) + arena->used); assert_bounds(save_point.slot, arena->start, end);
 	arena->used -= save_point.slot - cast(SSIZE, arena->start);
 }
 inline
@@ -1042,20 +1044,20 @@ inline void  os_vmem_release(void* vm, SSIZE size) { VirtualFree(vm, 0, MS_MEM_R
 #pragma endregion OS
 
 #pragma region VArena (Virutal Address Space Arena)
+finline U8 varena_header_size(void) { return align_pow2(size_of(VArena), MEMORY_ALIGNMENT_DEFAULT); }
 inline
 VArena* varena__make(Opts_varena_make* opts) {
 	assert(opts != nullptr);
 	if (opts->reserve_size == 0) { opts->reserve_size = mega(64); }
-	if (opts->commit_size  == 0) { opts->commit_size = mega(64); }
+	if (opts->commit_size  == 0) { opts->commit_size  = mega(64); }
 	SSIZE reserve_size   = align_pow2(opts->reserve_size, os_system_info()->target_page_size);
 	SSIZE commit_size    = align_pow2(opts->commit_size,  os_system_info()->target_page_size);
 	B32   no_large_pages = (opts->flags & VArenaFlag_NoLargePages) != 0;
-	Byte* base           = os__vmem_reserve(reserve_size, &(Opts_vmem){.base_addr = opts->base_addr, .no_large_pages = no_large_pages});
+	Byte* base           = os_vmem_reserve(reserve_size, .base_addr = opts->base_addr, .no_large_pages = no_large_pages);
 	assert(base != nullptr);
 	os_vmem_commit(base, commit_size, .no_large_pages = no_large_pages);
 	SSIZE header_size = align_pow2(size_of(VArena), MEMORY_ALIGNMENT_DEFAULT);
-	VArena* vm = cast(VArena*, base);
-	* vm = (VArena){
+	VArena* vm = cast(VArena*, base); * vm = (VArena){
 		.reserve_start = cast(SSIZE, base) + header_size,
 		.reserve       = reserve_size,
 		.commit_size   = commit_size,
@@ -1067,6 +1069,7 @@ VArena* varena__make(Opts_varena_make* opts) {
 }
 inline
 Slice_Byte varena__push(VArena* vm, SSIZE amount, SSIZE type_width, Opts_varena* opts) {
+	assert(vm     != nullptr);
 	assert(amount != 0);
 	SSIZE alignment      = opts->alignment ? opts->alignment : MEMORY_ALIGNMENT_DEFAULT;
 	SSIZE requested_size = amount * type_width;
@@ -1075,10 +1078,8 @@ Slice_Byte varena__push(VArena* vm, SSIZE amount, SSIZE type_width, Opts_varena*
 	SSIZE to_be_used     = vm->commit_used   + aligned_size;
 	SSIZE reserve_left   = vm->reserve       - vm->commit_used;
 	SSIZE commit_left    = vm->committed     - vm->commit_used;
-	B32   exhausted      = commit_left < to_be_used;
-	assert(to_be_used < reserve_left);
-	if (exhausted)
-	{
+	B32   exhausted      = commit_left < to_be_used; assert(to_be_used < reserve_left);
+	if (exhausted) {
 		SSIZE next_commit_size = reserve_left > 0 ?
 			max(vm->commit_size, to_be_used)
 		:	cast(SSIZE, align_pow2( reserve_left, os_system_info()->target_page_size));
@@ -1086,9 +1087,7 @@ Slice_Byte varena__push(VArena* vm, SSIZE amount, SSIZE type_width, Opts_varena*
 			Byte* next_commit_start = cast(Byte*, cast(SSIZE, vm) + vm->committed);
 			B32   no_large_pages    = (vm->flags & VArenaFlag_NoLargePages) != 0;
 			B32   commit_result     = os_vmem_commit(next_commit_start, next_commit_size, .no_large_pages =  no_large_pages);
-			if (commit_result == false) {
-				return (Slice_Byte){0};
-			}
+			if (commit_result == false) { return (Slice_Byte){0}; }
 			vm->committed += next_commit_size;
 		}
 	}
@@ -1191,10 +1190,8 @@ inline
 Arena* arena__make(Opts_arena_make* opts) {
 	assert(opts != nullptr);
 	SSIZE header_size = align_pow2(size_of(Arena), MEMORY_ALIGNMENT_DEFAULT);
-	VArena* current = varena__make(opts);
-	assert(current != nullptr);
-	Arena* arena = varena_push(current, Arena);
-	* arena = (Arena){
+	VArena* current = varena__make(opts); assert(current != nullptr);
+	Arena* arena = varena_push(current, Arena); * arena = (Arena){
 		.backing  = current,
 		.prev     = nullptr,
 		.current  = arena,
@@ -1213,7 +1210,7 @@ Slice_Byte arena__push(Arena* arena, SSIZE amount, SSIZE type_width, Opts_arena*
 	SSIZE size_aligned   = align_pow2(size_requested, alignment);
 	SSIZE pos_pre        = active->pos;
 	SSIZE pos_pst        = pos_pre + size_aligned;
-	B32 should_chain =
+	B32 should_chain = 
 		((arena->flags & ArenaFlag_NoChain) == 0)
 	&&	active->backing->reserve < pos_pst;
 	if (should_chain)
@@ -1275,11 +1272,9 @@ void arena_allocator_proc(AllocatorProc_In in, AllocatorProc_Out* out)
 			out->allocation       = arena_push_array(arena, Byte, in.requested_size, .alignment = in.alignment);
 			memory_zero(out->allocation.ptr, out->allocation.len * cast(SSIZE, in.op));
 		break;
-		case AllocatorOp_Free:
-		break;
-		case AllocatorOp_Reset:
-			arena_reset(arena);
-		break;
+
+		case AllocatorOp_Free:                      break;
+		case AllocatorOp_Reset: arena_reset(arena); break;
 
 		case AllocatorOp_Grow:
 		case AllocatorOp_Grow_NoZero: {
@@ -1331,13 +1326,9 @@ void arena_allocator_proc(AllocatorProc_In in, AllocatorProc_Out* out)
 		}
 		break;
 
-		case AllocatorOp_Rewind:
-			arena_rewind(arena, in.save_point);
-		break;
+		case AllocatorOp_Rewind:    arena_rewind(arena, in.save_point);  break;
+		case AllocatorOp_SavePoint: out->save_point = arena_save(arena); break;
 
-		case AllocatorOp_SavePoint:
-			out->save_point = arena_save(arena);
-		break;
 		case AllocatorOp_Query:
 			out->features =
 				AllocatorQuery_Alloc
