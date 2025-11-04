@@ -473,7 +473,7 @@ VArena*   varena__make(Opts_varena_make*R_ opts);
 finline void        varena_release(VArena_R arena);
 finline void        varena_rewind (VArena_R arena, AllocatorSP save_point);
         void        varena_reset  (VArena_R arena);
-        Slice_Mem   varena__shrink(VArena_R arena, Slice_Mem old_allocation, U8 requested_size, Opts_varena*R_ opts);
+        Slice_Mem   varena__shrink(VArena_R arena, Slice_Mem old_allocation, U8 requested_size);
 finline AllocatorSP varena_save   (VArena_R arena);
 
 void varena_allocator_proc(AllocatorProc_In in, AllocatorProc_Out_R out);
@@ -1159,21 +1159,21 @@ inline
 Slice_Mem varena__grow(VArena_R vm, Slice_Mem old_allocation, U8 requested_size, U8 alignment, B4 no_zero) {
 	Slice_Mem result;
 	U8 grow_amount = requested_size - old_allocation.len;
-	if (grow_amount == 0) { result =  old_allocation; return; }                  // Growing when not the last allocation not allowed
+	if (grow_amount == 0) { result =  old_allocation; return result; }           // Growing when not the last allocation not allowed
 	U8 current_offset = vm->reserve_start + vm->commit_used;                     assert(old_allocation.ptr == current_offset); 
 	Slice_Mem allocation = varena_push_mem(vm, grow_amount, alignment);          assert(allocation.ptr != 0);
-	result = (Slice_Mem){ old_allocation.ptr, requested_size + allocation.len }; memory_zero(result.ptr, result.len * no_zero);
+	result = (Slice_Mem){ old_allocation.ptr, requested_size + allocation.len }; 
+	memory_zero(result.ptr, result.len * no_zero);
+	return result;
 }
 finline void varena_release(VArena_R arena) { os_vmem_release(u8_(arena), arena->reserve); }
 inline
-Slice_Mem varena__shrink(VArena_R vm, Slice_Mem old_allocation, U8 requested_size, Opts_varena*R_ opts) {
-	assert(opts != nullptr);
-	Slice_Mem result = {0};
-	U8 shrink_amount  = old_allocation.len - requested_size;
-	if (lt_s(shrink_amount, 0)) { result = old_allocation; return result; }
+Slice_Mem varena__shrink(VArena_R vm, Slice_Mem old_allocation, U8 requested_size) {
+	U8 shrink_amount = old_allocation.len - requested_size;
+	if (lt_s(shrink_amount, 0)) { return old_allocation; }
 	U8 current_offset = vm->reserve_start + vm->commit_used; assert(old_allocation.ptr == current_offset);
 	vm->commit_used  -= shrink_amount;
-	result = (Slice_Mem){ old_allocation.ptr, requested_size }; return result;
+	return (Slice_Mem){ old_allocation.ptr, requested_size };
 }
 finline
 void varena_rewind(VArena_R vm, AllocatorSP sp) {
@@ -1197,32 +1197,11 @@ void varena_allocator_proc(AllocatorProc_In in, AllocatorProc_Out* out)
 		case AllocatorOp_Reset: vm->commit_used = 0; break;
 
 		case AllocatorOp_Grow_NoZero:
-		case AllocatorOp_Grow: {
-			U8 grow_amount = in.requested_size - in.old_allocation.len;
-			if (grow_amount == 0) {
-				out->allocation =  in.old_allocation;
-				return;
-			}
-			U8 current_offset = vm->reserve_start + vm->commit_used;
-			// Growing when not the last allocation not allowed
-			assert(in.old_allocation.ptr == current_offset);
-			Slice_Mem allocation = varena_push_mem(vm, grow_amount, .alignment = in.alignment);
-			assert(allocation.ptr != 0);
-			out->allocation = (Slice_Mem){ in.old_allocation.ptr, in.requested_size + allocation.len };
-			memory_zero(out->allocation.ptr, out->allocation.len * (in.op - AllocatorOp_Grow_NoZero));
-		}
+		case AllocatorOp_Grow:
+			out->allocation = varena__grow(vm, in.old_allocation, in.requested_size, in.alignment, in.op - AllocatorOp_Grow_NoZero);
 		break;
-		case AllocatorOp_Shrink: {
-			U8 current_offset = vm->reserve_start     + vm->commit_used;
-			U8 shrink_amount  = in.old_allocation.len - in.requested_size;
-			if (lt_s(shrink_amount, 0)) {
-				out->allocation = in.old_allocation;
-				return;
-			}
-			assert(in.old_allocation.ptr == current_offset);
-			vm->commit_used -= shrink_amount;
-			out->allocation  = (Slice_Mem){ in.old_allocation.ptr, in.requested_size };
-		}
+		case AllocatorOp_Shrink:
+			out->allocation = varena__shrink(vm, in.old_allocation, in.requested_size);
 		break;
 
 		case AllocatorOp_Rewind:    vm->commit_used = in.save_point.slot; break;
@@ -1327,80 +1306,80 @@ void arena_allocator_proc(AllocatorProc_In in, AllocatorProc_Out*R_ out)
 	assert(arena != nullptr);
 	switch (in.op)
 	{
-		case AllocatorOp_Alloc:
-		case AllocatorOp_Alloc_NoZero:
-			out->allocation = arena_push_mem(arena, in.requested_size, .alignment = in.alignment);
-			memory_zero(out->allocation.ptr, out->allocation.len * in.op);
-		break;
+	case AllocatorOp_Alloc:
+	case AllocatorOp_Alloc_NoZero:
+		out->allocation = arena_push_mem(arena, in.requested_size, .alignment = in.alignment);
+		memory_zero(out->allocation.ptr, out->allocation.len * in.op);
+	break;
 
-		case AllocatorOp_Free:                      break;
-		case AllocatorOp_Reset: arena_reset(arena); break;
+	case AllocatorOp_Free:                      break;
+	case AllocatorOp_Reset: arena_reset(arena); break;
 
-		case AllocatorOp_Grow:
-		case AllocatorOp_Grow_NoZero: {
-			Arena_R active = arena->current;
-			U8 alloc_end = in.old_allocation.ptr + in.old_allocation.len;
-			U8 arena_end = u8_(active) + active->pos;
-			if (alloc_end == arena_end)
+	case AllocatorOp_Grow:
+	case AllocatorOp_Grow_NoZero: {
+		Arena_R active = arena->current;
+		U8 alloc_end = in.old_allocation.ptr + in.old_allocation.len;
+		U8 arena_end = u8_(active) + active->pos;
+		if (alloc_end == arena_end)
+		{
+			U8 grow_amount  = in.requested_size - in.old_allocation.len;
+			U8 aligned_grow = align_pow2(grow_amount, in.alignment ? in.alignment : MEMORY_ALIGNMENT_DEFAULT);
+			if (active->pos + aligned_grow <= active->backing->reserve)
 			{
-				U8 grow_amount  = in.requested_size - in.old_allocation.len;
-				U8 aligned_grow = align_pow2(grow_amount, in.alignment ? in.alignment : MEMORY_ALIGNMENT_DEFAULT);
-				if (active->pos + aligned_grow <= active->backing->reserve)
+				Slice_Mem vresult = varena_push_mem(active->backing, aligned_grow, .alignment = in.alignment);
+				if (vresult.ptr != null)
 				{
-					Slice_Mem vresult = varena_push_mem(active->backing, aligned_grow, .alignment = in.alignment);
-					if (vresult.ptr != null)
-					{
-						active->pos          += aligned_grow;
-						out->allocation       = (Slice_Mem){in.old_allocation.ptr, in.requested_size};
-						memory_zero(in.old_allocation.ptr + in.old_allocation.len, grow_amount * in.op - AllocatorOp_Grow_NoZero);
-						break;
-					}
+					active->pos          += aligned_grow;
+					out->allocation       = (Slice_Mem){in.old_allocation.ptr, in.requested_size};
+					memory_zero(in.old_allocation.ptr + in.old_allocation.len, grow_amount * in.op - AllocatorOp_Grow_NoZero);
+					break;
 				}
 			}
-			Slice_Mem new_alloc = arena__push(arena, in.requested_size, 1, &(Opts_arena){.alignment = in.alignment});
-			if (new_alloc.ptr == null) {
-				out->allocation = (Slice_Mem){0};
-				break;
-			}
-			memory_copy(new_alloc.ptr, in.old_allocation.ptr, in.old_allocation.len);
-			memory_zero(new_alloc.ptr + in.old_allocation.len, (in.requested_size - in.old_allocation.len) * in.op - AllocatorOp_Grow_NoZero);
-			out->allocation       = new_alloc;
 		}
-		break;
+		Slice_Mem new_alloc = arena__push(arena, in.requested_size, 1, &(Opts_arena){.alignment = in.alignment});
+		if (new_alloc.ptr == null) {
+			out->allocation = (Slice_Mem){0};
+			break;
+		}
+		memory_copy(new_alloc.ptr, in.old_allocation.ptr, in.old_allocation.len);
+		memory_zero(new_alloc.ptr + in.old_allocation.len, (in.requested_size - in.old_allocation.len) * in.op - AllocatorOp_Grow_NoZero);
+		out->allocation       = new_alloc;
+	}
+	break;
 
-		case AllocatorOp_Shrink: {
-			Arena_R active = arena->current;
-			U8 alloc_end = in.old_allocation.ptr + in.old_allocation.len;
-			U8 arena_end = u8_(active) + active->pos;
-			if (alloc_end != arena_end) {
-				out->allocation = (Slice_Mem){in.old_allocation.ptr, in.requested_size};
-				break;
-			}
-			//SSIZE shrink_amount    = in.old_allocation.len - in.requested_size;
-			U8 aligned_original = align_pow2(in.old_allocation.len, MEMORY_ALIGNMENT_DEFAULT);
-			U8 aligned_new      = align_pow2(in.requested_size, in.alignment ? in.alignment : MEMORY_ALIGNMENT_DEFAULT);
-			U8 pos_reduction    = aligned_original - aligned_new;
-			active->pos        -= pos_reduction;
-			varena__shrink(active->backing, in.old_allocation, in.requested_size, &(Opts_varena){.alignment = in.alignment});
+	case AllocatorOp_Shrink: {
+		Arena_R active = arena->current;
+		U8 alloc_end = in.old_allocation.ptr + in.old_allocation.len;
+		U8 arena_end = u8_(active) + active->pos;
+		if (alloc_end != arena_end) {
 			out->allocation = (Slice_Mem){in.old_allocation.ptr, in.requested_size};
+			break;
 		}
-		break;
+		//SSIZE shrink_amount    = in.old_allocation.len - in.requested_size;
+		U8 aligned_original = align_pow2(in.old_allocation.len, MEMORY_ALIGNMENT_DEFAULT);
+		U8 aligned_new      = align_pow2(in.requested_size, in.alignment ? in.alignment : MEMORY_ALIGNMENT_DEFAULT);
+		U8 pos_reduction    = aligned_original - aligned_new;
+		active->pos        -= pos_reduction;
+		varena__shrink(active->backing, in.old_allocation, in.requested_size, &(Opts_varena){.alignment = in.alignment});
+		out->allocation = (Slice_Mem){in.old_allocation.ptr, in.requested_size};
+	}
+	break;
 
-		case AllocatorOp_Rewind:    arena_rewind(arena, in.save_point);  break;
-		case AllocatorOp_SavePoint: out->save_point = arena_save(arena); break;
+	case AllocatorOp_Rewind:    arena_rewind(arena, in.save_point);  break;
+	case AllocatorOp_SavePoint: out->save_point = arena_save(arena); break;
 
-		case AllocatorOp_Query:
-			out->features =
-				AllocatorQuery_Alloc
-			|	AllocatorQuery_Resize
-			|	AllocatorQuery_Reset
-			|	AllocatorQuery_Rewind
-			;
-			out->max_alloc  = arena->backing->reserve;
-			out->min_alloc  = kilo(4);
-			out->left       = out->max_alloc - arena->backing->commit_used;
-			out->save_point = arena_save(arena);
-		break;
+	case AllocatorOp_Query:
+		out->features =
+			AllocatorQuery_Alloc
+		|	AllocatorQuery_Resize
+		|	AllocatorQuery_Reset
+		|	AllocatorQuery_Rewind
+		;
+		out->max_alloc  = arena->backing->reserve;
+		out->min_alloc  = kilo(4);
+		out->left       = out->max_alloc - arena->backing->commit_used;
+		out->save_point = arena_save(arena);
+	break;
 	}
 }
 #pragma endregion Arena
