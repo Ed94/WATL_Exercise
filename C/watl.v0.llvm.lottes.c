@@ -280,7 +280,7 @@ typedef def_Slice(B1);
 #define slice_to_bytes(slice) ((Slice_B1){cast(B1*, (slice).ptr), (slice).len * size_of_slice_type(slice)})
 #define slice_fmem(mem)       slice_mem(u8_(mem), size_of(mem))
 
-I_ void slice__zero(Slice_B1 mem, U8 typewidth) { slice_assert(mem); memory_zero(u8_(mem.ptr), mem.len); }
+I_ void slice__zero(Slice_B1 mem, U8 typewidth) { slice_assert(mem); mem_zero(u8_(mem.ptr), mem.len); }
 #define slice_zero(slice) slice__zero(slice_mem_s(slice), size_of_slice_type(slice))
 
 I_ void slice__copy(Slice_B1 dest, U8 dest_typewidth, Slice_B1 src, U8 src_typewidth) {
@@ -522,7 +522,6 @@ typedef def_struct(Opts_varena_make) {
 	VArenaFlags flags;
 };
 
-
    U8   varena__make__u  (U8 reserve_size, U8 commit_size, U4 flags, U8 base_addr);
 I_ void varena_release__u(U8 arena);
 I_ void varena_reset__u  (U8 arena);
@@ -546,7 +545,6 @@ void varena_allocator_proc(U8 data, U8 requested_size, U8 alignment, U8 old_ptr,
 
 #define ainfo_varena(arena) (AllocatorInfo){ .proc = varena_allocator_proc, .data = u8_(arena) }
 
-
 #define varena_push_mem(arena, amount, ...) varena__push(arena, amount, 1, opt_args(Opts_varena, __VA_ARGS__))
 
 #define varena_push(arena, type, ...) \
@@ -557,6 +555,7 @@ cast(type*, varena__push(arena, size_of(type), 1, opt_args(Opts_varena, __VA_ARG
 #pragma endregion VArena
 
 #pragma region Arena
+
 #pragma endregion Arena
 
 #pragma region Hashing
@@ -1018,7 +1017,7 @@ void varena_allocator_proc(U8 vm, U8 requested_size, U8 alignment, U8 old_ptr, U
 		if (op == AllocatorOp_Alloc) {
 			U8 ptr = u8_r(out_allocation + soff(Slice_Mem, ptr))[0];
 			U8 len = u8_r(out_allocation + soff(Slice_Mem, len))[0];
-			if (ptr && len) { memory_zero(ptr, len); }
+			if (ptr && len) { mem_zero(ptr, len); }
 		}
 	break;
 
@@ -1057,6 +1056,62 @@ void varena_allocator_proc(U8 vm, U8 requested_size, U8 alignment, U8 old_ptr, U
 
 #pragma region Arena
 #pragma endregion Arena
+
+#pragma region Debug
+#if defined(BUILD_DEBUG)
+// #include <stdio.h>
+#define MS_CRT_INTERNAL_LOCAL_PRINTF_OPTIONS (*__local_stdio_printf_options())
+#define MS_stderr                          (__acrt_iob_func(2))
+#define MS__crt_va_start_a(ap, x)          ((void)(__va_start(&ap, x)))
+#define MS__crt_va_arg(ap, t)                                          \
+	((sizeof(t) > sizeof(__int64) || (sizeof(t) & (sizeof(t) - 1)) != 0) \
+		? **(t**)((ap += sizeof(__int64)) - sizeof(__int64))               \
+		:  *(t* )((ap += sizeof(__int64)) - sizeof(__int64)))
+#define MS__crt_va_end(ap)           ((void)(ap = (va_list)0))
+#define va_start(ap, x)              MS__crt_va_start_a(ap, x)
+#define va_arg                       MS__crt_va_arg
+#define va_end                       MS__crt_va_end
+#define va_copy(destination, source) ((destination) = (source))
+typedef def_struct(__crt_locale_pointers) { struct __crt_locale_data* locinfo; struct __crt_multibyte_data* mbcinfo; };
+typedef __crt_locale_pointers* _locale_t;
+typedef char*                  va_list;
+MS_FILE* __cdecl __acrt_iob_func(unsigned _Ix);
+N_
+U8* __cdecl __local_stdio_printf_options(void) {
+	// NOTE(CRT): This function must not be inlined into callers to avoid ODR violations.  The
+	// static local variable has different names in C and in C++ translation units.
+	local_persist U8 _OptionsStorage; return &_OptionsStorage;
+}
+int __cdecl __stdio_common_vfprintf_s(
+	U8               _Options,
+	MS_FILE*         _Stream,
+	char const*      _Format,
+	_locale_t        _Locale,
+	va_list          _ArgList
+);
+void __cdecl __va_start(va_list* , ...);
+I_ int printf_err(char const* fmt, ...) {
+	int result;
+	va_list args;
+	va_start(args, fmt);
+	result = __stdio_common_vfprintf_s(MS_CRT_INTERNAL_LOCAL_PRINTF_OPTIONS, MS_stderr, fmt, nullptr, args);
+	va_end(args);
+	return result;
+}
+void assert_handler( UTF8*R_ condition, UTF8*R_ file, UTF8*R_ function, S4 line, UTF8*R_ msg, ... ) {
+	printf_err( "%s - %s:(%d): Assert Failure: ", file, function, line );
+	if ( condition )
+		printf_err( "`%s` \n", condition );
+	if ( msg ) {
+		va_list va = {0};
+		va_start( va, msg );
+		__stdio_common_vfprintf_s(MS_CRT_INTERNAL_LOCAL_PRINTF_OPTIONS, MS_stderr, msg, nullptr, va);
+		va_end( va );
+	}
+	printf_err( "%s", "\n" );
+}
+#endif
+#pragma endregion Debug
 
 #pragma endregion Implementation
 
