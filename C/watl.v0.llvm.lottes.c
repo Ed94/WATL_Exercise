@@ -4,13 +4,17 @@ Version:   0 (From Scratch, 1-Stage Compilation, LLVM & WinAPI Only, Win CRT Mul
 Host:      Windows 11 (x86-64)
 Toolchain: LLVM (2025-08-30), C-Stanard: 11
 
-Following strictly (mostly): Neokineogfx - Fixing C
+Following strictly: Neokineogfx - Fixing C
 https://youtu.be/RrL7121MOeA
 
 Unlike lottes_hybrid this file will be entirely untyped for any pointer addressing.
 Win CRT imports will also be typeless signatures.
 */
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wpre-c11-compat"
+// #pragma clang diagnostic ignored "-Wc++-keyword"
+#pragma clang diagnostic ignored "-Wcast-qual"
 #pragma clang diagnostic ignored "-Wunused-const-variable"
 #pragma clang diagnostic ignored "-Wunused-but-set-variable"
 #pragma clang diagnostic ignored "-Wswitch"
@@ -24,12 +28,10 @@ Win CRT imports will also be typeless signatures.
 #pragma clang diagnostic ignored "-Wkeyword-macro"
 #pragma clang diagnostic ignored "-Wc23-compat"
 #pragma clang diagnostic ignored "-Wreserved-identifier"
-#pragma clang diagnostic ignored "-Wpre-c11-compat"
 #pragma clang diagnostic ignored "-Wc23-extensions"
 #pragma clang diagnostic ignored "-Wunused-macros"
 #pragma clang diagnostic ignored "-Wdeclaration-after-statement"
 #pragma clang diagnostic ignored "-Wunsafe-buffer-usage"
-#pragma clang diagnostic ignored "-Wc++-keyword"
 #pragma clang diagnostic ignored "-Wimplicit-function-declaration"
 #pragma clang diagnostic ignored "-Wcast-align"
 #pragma clang diagnostic ignored "-Wunused-parameter"
@@ -59,7 +61,7 @@ Win CRT imports will also be typeless signatures.
 #define glue_impl(A, B)    A ## B
 #define glue(A, B)         glue_impl(A, B)
 #define stringify_impl(S)  #S
-#define stringify(S)       stringify_impl(S)
+#define stringify(S)       cast(UTF8*, stringify_impl(S))
 #define tmpl(prefix, type) prefix ## _ ## type
 
 #define static_assert      _Static_assert
@@ -131,7 +133,7 @@ enum { false = 0, true  = 1, true_overflow, };
 #define pcast(type, data)                   cast(type*, & (data))[0]
 #define nullptr                             cast(void*, 0)
 #define null                                cast(U8,    0)
-#define offset_of(type, member)             cast(U8, & (((type*) 0)->member))
+#define soff(type, member)                  cast(U8, & (((type*) 0)->member))
 #define size_of(data)                       cast(U8, sizeof(data))
 
 #define r_(ptr)                             cast(typeof_ptr(ptr)*R_, ptr)
@@ -198,8 +200,8 @@ typedef def_struct(Slice_Str8) { U8 ptr; U8 len; };
 	{                        \
 		assert_handler(        \
 			stringify(cond),     \
-			__FILE__,            \
-			__func__,            \
+			(UTF8*)__FILE__,     \
+			(UTF8*)__func__,     \
 			cast(S4, __LINE__),  \
 			msg,                 \
 			## __VA_ARGS__);     \
@@ -229,6 +231,8 @@ I_ B4 mem_zero            (U8 dest,           U8 len) { if (dest == 0) return fa
 
 #define struct_copy(type, dest, src) mem_copy(dest, src, sizeof(type))
 #define struct_zero(type, dest)      mem_zero(dest,      sizeof(type))
+
+#define struct_assign(type, dest, src) cast(type*R_, dest)[0] = cast(type*R_, src)[0]
 
 I_ U8 align_pow2(U8 x, U8 b) {
     assert(b != 0);
@@ -292,6 +296,19 @@ I_ void slice__copy(Slice_B1 dest, U8 dest_typewidth, Slice_B1 src, U8 src_typew
 
 #define slice_iter(container, iter)     (typeof((container).ptr) iter = (container).ptr; iter != slice_end(container); ++ iter)
 #define slice_arg_from_array(type, ...) & (tmpl(Slice,type)) { .ptr = farray_init(type, __VA_ARGS__), .len = farray_len( farray_init(type, __VA_ARGS__)) }
+
+I_ void slice_assign(U8 dest, U8 src) {
+	u8_r(dest + soff(Slice_Mem, ptr))[0] = u8_r(src + soff(Slice_Mem, ptr))[0];
+	u8_r(dest + soff(Slice_Mem, len))[0] = u8_r(src + soff(Slice_Mem, len))[0];
+}
+I_ void slice_assign_comp(U8 dest, U8 ptr, U8 len) {
+	u8_r(dest + soff(Slice_Mem, ptr))[0] = ptr;
+	u8_r(dest + soff(Slice_Mem, len))[0] = len;
+}
+I_ void slice_clear(U8 base) {
+	u8_r(base + soff(Slice_Mem, ptr))[0] = 0;
+	u8_r(base + soff(Slice_Mem, len))[0] = 0;
+}
 
 #define span_iter(type, iter, m_begin, op, m_end) \
 (                                   \
@@ -474,12 +491,12 @@ global OS_Windows_State os__windows_info;
 I_ OS_SystemInfo* os_system_info(void);
 I_ void           os_init       (void);
 
-I_ U8   os_vmem_reserve__u(       U8 size, U4 no_large_pages, U8 base_addr);
-I_ B4   os_vmem_commit__u (U8 vm, U8 size);
+I_ U8   os_vmem_reserve__u(       U8 size, B4 no_large_pages, U8 base_addr);
+I_ B4   os_vmem_commit__u (U8 vm, U8 size, B4 no_large_pages);
 I_ void os_vmem_release__u(U8 vm, U8 size);
 
 I_ U8   os__vmem_reserve(       U8 size, Opts_vmem_R opts);
-I_ B4   os_vmem_commit  (U8 vm, U8 size);
+I_ B4   os_vmem_commit  (U8 vm, U8 size, Opts_vmem_R opts);
 I_ void os_vmem_release (U8 vm, U8 size);
 
 #define os_vmem_reserve(size, ...)    os__vmem_reserve(size, opt_args(Opts_vmem, __VA_ARGS__))
@@ -505,7 +522,8 @@ typedef def_struct(Opts_varena_make) {
 	VArenaFlags flags;
 };
 
-I_ U8   varena__make__u  (U8 reserve_size, U8 commit_size, U4 flags, U8 base_addr);
+
+   U8   varena__make__u  (U8 reserve_size, U8 commit_size, U4 flags, U8 base_addr);
 I_ void varena_release__u(U8 arena);
 I_ void varena_reset__u  (U8 arena);
 I_ void varena_rewind__u (U8 arena,  U8 sp_type_sig, U8 sp_slot);
@@ -522,9 +540,12 @@ I_ void         varena_rewind (VArena_R arena, AllocatorSP save_point);
 I_ Slice_Mem    varena__shrink(VArena_R arena, Slice_Mem old_allocation, U8 requested_size, Opts_varena*R_ opts);
 I_ AllocatorSP  varena_save   (VArena_R arena);
 
+#define varena_make(...) varena__make(opt_args(Opts_varena_make, __VA_ARGS__))
+
 void varena_allocator_proc(U8 data, U8 requested_size, U8 alignment, U8 old_ptr, U8 old_len, U4 op, /*AllocatorProc_Out*/U8 out);
 
 #define ainfo_varena(arena) (AllocatorInfo){ .proc = varena_allocator_proc, .data = u8_(arena) }
+
 
 #define varena_push_mem(arena, amount, ...) varena__push(arena, amount, 1, opt_args(Opts_varena, __VA_ARGS__))
 
@@ -534,6 +555,32 @@ cast(type*, varena__push(arena, size_of(type), 1, opt_args(Opts_varena, __VA_ARG
 #define varena_push_array(arena, type, amount, ...) \
 (tmpl(Slice,type)){ varena__push(arena, size_of(type), amount, opt_args(Opts_varena, __VA_ARGS__)).ptr, amount }
 #pragma endregion VArena
+
+#pragma region Arena
+#pragma endregion Arena
+
+#pragma region Hashing
+I_ void hash64_fnv1a__u(U8 hash, U8 data_ptr, U8 data_len, U8 seed) {
+	local_persist U8 const default_seed = 0xcbf29ce484222325; 
+	if (seed != 0) { u8_r(hash)[0] = seed; }
+	else           { u8_r(hash)[0] = default_seed; }
+	U8 elem = data_ptr;
+loop:
+	if (elem == data_ptr + data_len) goto end;
+	u8_r(hash)[0] ^= u1_r(elem)[0];
+	u8_r(hash)[0] *= 0x100000001b3;
+	elem += 1;
+	goto loop;
+end: 
+	return;
+}
+typedef def_struct(Opts_hash64_fnv1a) { U8 seed; };
+I_ void hash64__fnv1a(U8_R hash, Slice_Mem data, Opts_hash64_fnv1a*R_ opts) {
+	assert(opts != nullptr);
+	hash64_fnv1a__u(u8_(hash), data.ptr, data.len, opts->seed);
+}
+#define hash64_fnv1a(hash, data, ...) hash64__fnv1a(hash, data, opt_args(Opts_hash64_fnv1a, __VA_ARGS__))
+#pragma endregion Hashing
 
 #pragma endregion Header
 
@@ -560,29 +607,29 @@ I_ void mem_save_point__u(U8 proc, U8 data, U8 sp) {
 	assert(proc != null);
 	uvar(AllocatorProc_Out, out) = {0}; 
 	cast(AllocatorProc*, proc)(data, 0, 0, 0, 0, AllocatorOp_SavePoint, u8_(out));
-	struct_copy(AllocatorSP, sp, (U8) out + offset_of(AllocatorProc_Out, save_point));
+	struct_assign(AllocatorSP, sp, (U8) out + soff(AllocatorProc_Out, save_point));
 }
 I_ void mem__alloc__u(U8 out_mem, U8 proc, U8 data, U8 size, U8 alignment, B4 no_zero) {
 	assert(proc != null);
 	uvar(AllocatorProc_Out, out) = {0};
 	cast(AllocatorProc*, proc)(data, size, alignment, 0, 0, no_zero ? AllocatorOp_Alloc_NoZero : AllocatorOp_Alloc, u8_(out));
-	struct_copy(Slice_Mem, out_mem, (U8) out + offset_of(AllocatorProc_Out, allocation));
+	slice_assign(out_mem, (U8) out + soff(AllocatorProc_Out, allocation));
 }
 I_ void mem__grow__u(U8 out_mem, U8 proc, U8 data, U8 old_ptr, U8 old_len, U8 size, U8 alignment, B4 no_zero, B4 give_actual) {
 	assert(proc != null);
 	uvar(AllocatorProc_Out, out) = {0};
 	cast(AllocatorProc*, proc)(data, size, alignment, old_ptr, old_len, no_zero ? AllocatorOp_Grow_NoZero : AllocatorOp_Grow, u8_(out));
-	if (give_actual == false) { u8_r(out + offset_of(AllocatorProc_Out, allocation) + offset_of(Slice_Mem, len))[0] = size; }
-	struct_copy(Slice_Mem, out_mem, (U8) out + offset_of(AllocatorProc_Out, allocation));
+	if (give_actual == false) { u8_r(out + soff(AllocatorProc_Out, allocation) + soff(Slice_Mem, len))[0] = size; }
+	slice_assign(out_mem, (U8) out + soff(AllocatorProc_Out, allocation));
 }
 I_ void mem__shrink__u(U8 out_mem, U8 proc, U8 data, U8 old_ptr, U8 old_len, U8 size, U8 alignment) {
 	assert(proc != null);
 	uvar(AllocatorProc_Out, out) = {0};
 	cast(AllocatorProc*, proc)(data, size, alignment, old_ptr, old_len, AllocatorOp_Shrink, u8_(out));
-	struct_copy(Slice_Mem, out_mem, (U8) out + offset_of(AllocatorProc_Out, allocation));
+	slice_assign(out_mem, (U8) out + soff(AllocatorProc_Out, allocation));
 }
 I_ void mem__resize__u(U8 out_mem, U8 proc, U8 data, U8 old_ptr, U8 old_len, U8 size, U8 alignment, B4 no_zero, B4 give_acutal) { 
-	if (old_len == size) { struct_copy(Slice_Mem, out_mem, (U8)& slice_mem(old_ptr, old_len)); }
+	if (old_len == size) { slice_assign_comp(out_mem, old_ptr, old_len); }
 	if (old_len <  size) { mem__grow__u  (out_mem, proc, data, old_ptr, old_len, size, alignment, no_zero, give_acutal); }
 	else                 { mem__shrink__u(out_mem, proc, data, old_ptr, old_len, size, alignment); }
 }
@@ -621,87 +668,87 @@ I_ Slice_Mem mem__shrink(AllocatorInfo ainfo, Slice_Mem mem, U8 size, Opts_mem_s
 #pragma region FArena (Fixed-Sized Arena)
 I_ void farena_init__u(U8 arena, U8 mem_ptr, U8 mem_len) {
 	assert(arena != null);
-	u8_r(arena + offset_of(FArena, start)   )[0] = mem_ptr;
-	u8_r(arena + offset_of(FArena, capacity))[0] = mem_len;
-	u8_r(arena + offset_of(FArena, used)    )[0] = 0;
+	u8_r(arena + soff(FArena, start)   )[0] = mem_ptr;
+	u8_r(arena + soff(FArena, capacity))[0] = mem_len;
+	u8_r(arena + soff(FArena, used)    )[0] = 0;
 }
 inline void farena__push__u(U8 arena, U8 amount, U8 type_width, U8 alignment, U8 result) {
 	if (amount == 0) { struct_zero(Slice_Mem, result); }
 	U8   reg desired   = type_width * amount;
 	U8   reg to_commit = align_pow2(desired, alignment ?  alignment : MEMORY_ALIGNMENT_DEFAULT);
-	U8_R reg used      = u8_r(arena + offset_of(FArena, used));
-	U8   reg unused    = u8_r(arena + offset_of(FArena, capacity))[0] - used[0]; assert(to_commit <= unused);
-	U8   reg ptr       = u8_r(arena + offset_of(FArena, start)   )[0] + used[0];
+	U8_R reg used      = u8_r(arena + soff(FArena, used));
+	U8   reg unused    = u8_r(arena + soff(FArena, capacity))[0] - used[0]; assert(to_commit <= unused);
+	U8   reg ptr       = u8_r(arena + soff(FArena, start)   )[0] + used[0];
 	used[0] += to_commit;
-	struct_copy(Slice_Mem, result, (U8)& slice_mem(ptr, desired));
+	slice_assign_comp(result, ptr, desired);
 }
 inline void farena__grow__u(U8 result, U8 arena, U8 old_ptr, U8 old_len, U8 requested_size, U8 alignment, B4 should_zero) {
 	assert(result != null);
 	assert(arena  != null);
-	U8_R reg used = u8_r(arena + offset_of(FArena, used));
+	U8_R reg used = u8_r(arena + soff(FArena, used));
 	/*Check if the allocation is at the end of the arena*/{
 		U8 reg alloc_end = old_ptr + old_len;
-		U8 reg arena_end = u8_r(arena + offset_of(FArena, start))[0] + used[0];
+		U8 reg arena_end = u8_r(arena + soff(FArena, start))[0] + used[0];
 		if (alloc_end != arena_end) {
 			// Not at the end, can't grow in place
-			struct_zero(Slice_Mem, result);
+			slice_clear(result);
 			return;
 		}
 	}
 	// Calculate growth
 	U8 reg grow_amount  = requested_size - old_len;
 	U8 reg aligned_grow = align_pow2(grow_amount, alignment ? alignment : MEMORY_ALIGNMENT_DEFAULT);
-	U8 reg unused       = u8_r(arena + offset_of(FArena, capacity))[0] - used[0];
+	U8 reg unused       = u8_r(arena + soff(FArena, capacity))[0] - used[0];
 	if (aligned_grow > unused) {
 		// Not enough space
-		struct_zero(Slice_Mem, result);
+		slice_clear(result);
 		return;
 	}
 	used[0] += aligned_grow;
-	struct_copy(Slice_Mem, result, (U8)& slice_mem(old_ptr, aligned_grow + requested_size));
-	memory_zero(old_ptr + old_len, grow_amount * cast(U8, should_zero));
+	slice_assign_comp(result, old_ptr, aligned_grow + requested_size);
+	mem_zero(old_ptr + old_len, grow_amount * cast(U8, should_zero));
 }
 inline void farena__shrink__u(U8 result, U8 arena, U8 old_ptr, U8 old_len, U8 requested_size, U8 alignment) {
 	assert(result != null);
 	assert(arena  != null);
-	U8_R reg used = u8_r(arena + offset_of(FArena, used));
+	U8_R reg used = u8_r(arena + soff(FArena, used));
 	/*Check if the allocation is at the end of the arena*/ {
 		U8 reg alloc_end = old_ptr + old_len;
-		U8 reg arena_end = u8_r(arena + offset_of(FArena, start))[0] + used[0];
+		U8 reg arena_end = u8_r(arena + soff(FArena, start))[0] + used[0];
 		if (alloc_end != arena_end) {
 			// Not at the end, can't shrink but return adjusted size
-			struct_copy(Slice_Mem, result, (U8)& slice_mem(old_ptr, requested_size));
+			slice_assign_comp(result, old_ptr, requested_size);
 			return;
 		}
 	}
 	U8 reg aligned_original = align_pow2(old_len, MEMORY_ALIGNMENT_DEFAULT);
 	U8 reg aligned_new      = align_pow2(requested_size, alignment ? alignment : MEMORY_ALIGNMENT_DEFAULT);
 	used[0] -= (aligned_original - aligned_new);
-	struct_copy(Slice_Mem, result, (U8)& slice_mem(old_ptr, requested_size));
+	slice_assign_comp(result, old_ptr, requested_size);
 }
-I_ void farena_reset__u(U8 arena) { u8_r(arena + offset_of(FArena, used))[0] = 0; }
+I_ void farena_reset__u(U8 arena) { u8_r(arena + soff(FArena, used))[0] = 0; }
 I_ void farena_rewind__u(U8 arena, U8 sp_type_sig, U8 sp_slot) {
 	assert(sp_type_sig == (U8)& farena_allocator_proc);
-	U8   reg start = u8_r(arena + offset_of(FArena, start))[0];
-	U8_R reg used  = u8_r(arena + offset_of(FArena, used));
+	U8   reg start = u8_r(arena + soff(FArena, start))[0];
+	U8_R reg used  = u8_r(arena + soff(FArena, used));
 	U8   reg end   = start + used[0]; assert_bounds(sp_slot, start, end);
 	used[0] -= sp_slot - start;
 }
 I_ void farena_save__u(U8 arena, U8 sp) {
-	u8_r(sp + offset_of(AllocatorSP, type_sig))[0] = (U8)& farena_allocator_proc;
-	u8_r(sp + offset_of(AllocatorSP, slot    ))[0] = u8_r(arena + offset_of(FArena, used))[0];
+	u8_r(sp + soff(AllocatorSP, type_sig))[0] = (U8)& farena_allocator_proc;
+	u8_r(sp + soff(AllocatorSP, slot    ))[0] = u8_r(arena + soff(FArena, used))[0];
 }
 void farena_allocator_proc(U8 arena, U8 requested_size, U8 alignment, U8 old_ptr, U8 old_len, U4 op, /*AllocatorProc_Out*/U8 out)
 {
 	assert(out   != null);
 	assert(arena != null);
-	U8 reg allocation = arena + offset_of(AllocatorProc_Out, allocation);
+	U8 reg allocation = arena + soff(AllocatorProc_Out, allocation);
 	switch (op)
 	{
 		case AllocatorOp_Alloc:
 		case AllocatorOp_Alloc_NoZero:
 			farena__push__u(arena, requested_size, 1, alignment, allocation);
-			memory_zero(u8_r(allocation + offset_of(Slice_Mem, ptr))[0], u8_r(allocation + offset_of(Slice_Mem, len))[0] * op);
+			mem_zero(u8_r(allocation + soff(Slice_Mem, ptr))[0], u8_r(allocation + soff(Slice_Mem, len))[0] * op);
 		break;
 		case AllocatorOp_Free:                       break;
 		case AllocatorOp_Reset: farena_reset__u(arena); break;
@@ -718,17 +765,17 @@ void farena_allocator_proc(U8 arena, U8 requested_size, U8 alignment, U8 old_ptr
 		case AllocatorOp_SavePoint: farena_save__u(arena, allocation);         break;
 
 		case AllocatorOp_Query:
-			u4_r(out + offset_of(AllocatorQueryInfo, features))[0] =
+			u4_r(out + soff(AllocatorQueryInfo, features))[0] =
 			  AllocatorQuery_Alloc
 			| AllocatorQuery_Reset
 			| AllocatorQuery_Resize
 			| AllocatorQuery_Rewind
 			;
-			U8 reg max_alloc = u8_r(arena + offset_of(FArena, capacity))[0] - u8_r(arena + offset_of(FArena, used))[0];
-			u8_r(out + offset_of(AllocatorQueryInfo, max_alloc))[0] = max_alloc;
-			u8_r(out + offset_of(AllocatorQueryInfo, min_alloc))[0] = 0;
-			u8_r(out + offset_of(AllocatorQueryInfo, left     ))[0] = max_alloc;
-			farena_save__u(arena, out + offset_of(AllocatorQueryInfo, save_point));
+			U8 reg max_alloc = u8_r(arena + soff(FArena, capacity))[0] - u8_r(arena + soff(FArena, used))[0];
+			u8_r(out + soff(AllocatorQueryInfo, max_alloc))[0] = max_alloc;
+			u8_r(out + soff(AllocatorQueryInfo, min_alloc))[0] = 0;
+			u8_r(out + soff(AllocatorQueryInfo, left     ))[0] = max_alloc;
+			farena_save__u(arena, out + soff(AllocatorQueryInfo, save_point));
 		break;
 	}
 	return;
@@ -815,21 +862,27 @@ I_ U8 os_vmem_reserve__u(U8 size, B4 no_large_pages, U8 base_addr) {
 		MS_PAGE_READWRITE /* | (opts->no_large_pages ? 0 : MS_MEM_LARGE_PAGES) */)
 	);
 }
-I_ B4   os_vmem_commit__u (U8 vm, U8 size) { return ms_virtual_alloc(cast(MS_LPVOID, vm), size, MS_MEM_COMMIT, MS_PAGE_READWRITE) != null; }
+I_ B4   os_vmem_commit__u (U8 vm, U8 size, B4 no_large_pages) { 
+	// if (no_large_pages == false ) { return 1; }
+	return ms_virtual_alloc(cast(MS_LPVOID, vm), size, MS_MEM_COMMIT, MS_PAGE_READWRITE) != null; 
+}
 I_ void os_vmem_release__u(U8 vm, U8 size) { ms_virtual_free(cast(MS_LPVOID, vm), 0, MS_MEM_RESERVE); }
 
 I_ U8   os__vmem_reserve( U8 size, Opts_vmem_R opts) { 
 	assert(opts != nullptr);
 	return os_vmem_reserve__u(size, opts->no_large_pages, opts->base_addr); 
 }
-I_ B4   os_vmem_commit (U8 vm, U8 size) { return os_vmem_commit__u(vm, size); }
+I_ B4   os_vmem_commit (U8 vm, U8 size, Opts_vmem_R opts) { 
+	assert(opts != nullptr);
+	return os_vmem_commit__u(vm, size, opts->no_large_pages); 
+}
 I_ void os_vmem_release(U8 vm, U8 size) { os_vmem_release__u(vm, size); }
 #pragma endregion OS
 
 #pragma region VArena (Virtual Address Space Arena)
 I_ U8 varena_header_size(void) { return align_pow2(size_of(VArena), MEMORY_ALIGNMENT_DEFAULT); }
 
-I_ U8 varena__make__u(U8 reserve_size, U8 commit_size, U4 flags, U8 base_addr) {
+inline U8 varena__make__u(U8 reserve_size, U8 commit_size, U4 flags, U8 base_addr) {
 	if (reserve_size == 0) { reserve_size = mega(64); }
 	if (commit_size  == 0) { commit_size  = mega(64); }
 	U8 reg page       = os_system_info()->target_page_size;
@@ -837,86 +890,96 @@ I_ U8 varena__make__u(U8 reserve_size, U8 commit_size, U4 flags, U8 base_addr) {
 	U8 reg commit_sz  = align_pow2(commit_size,  page);
 	B4 reg no_large   = (flags & VArenaFlag_NoLargePages) != 0;
 	U8 base       = os_vmem_reserve__u(reserve_sz, no_large, base_addr); assert(base != 0);
-	B4 ok         = os_vmem_commit__u(base, commit_sz);	                 assert(ok   != 0);
+	B4 ok         = os_vmem_commit__u(base, commit_sz, no_large);	       assert(ok   != 0);
 	U8 header     = varena_header_size();
 	U8 data_start = base + header;
-	u8_r(base + offset_of(VArena, reserve_start))[0] = data_start;
-	u8_r(base + offset_of(VArena, reserve      ))[0] = reserve_sz;
-	u8_r(base + offset_of(VArena, commit_size  ))[0] = commit_sz;
-	u8_r(base + offset_of(VArena, committed    ))[0] = commit_sz;
-	u8_r(base + offset_of(VArena, commit_used  ))[0] = header;
-	u4_r(base + offset_of(VArena, flags        ))[0] = flags;
+	u8_r(base + soff(VArena, reserve_start))[0] = data_start;
+	u8_r(base + soff(VArena, reserve      ))[0] = reserve_sz;
+	u8_r(base + soff(VArena, commit_size  ))[0] = commit_sz;
+	u8_r(base + soff(VArena, committed    ))[0] = commit_sz;
+	u8_r(base + soff(VArena, commit_used  ))[0] = header;
+	u4_r(base + soff(VArena, flags        ))[0] = flags;
 	return base;
 }
 inline
 void varena__push__u(U8 vm, U8 amount, U8 type_width, U8 alignment, U8 result) {
 	assert(result != null);
 	assert(vm  != null);
-	if (amount == 0) { struct_zero(Slice_Mem, result); return; }
-	U8       align          = alignment ? alignment : MEMORY_ALIGNMENT_DEFAULT;
+	if (amount == 0) { slice_clear(result); return; }
+	alignment = alignment == 0 ? alignment : MEMORY_ALIGNMENT_DEFAULT;
 	U8       requested_size = amount * type_width;
-	U8   reg aligned_size   = align_pow2(requested_size, align);
-	U8_R reg commit_used    = u8_r(vm + offset_of(VArena, commit_used  ));
-	U8   reg reserve_left   = u8_r(vm + offset_of(VArena, reserve      ))[0] - commit_used[0];
-	if (aligned_size > reserve_left) { struct_zero(Slice_Mem, result); return; }
-	U8 reg committed   = u8_r(vm + offset_of(VArena, committed  ))[0];
-	U8     commit_left = committed - commit_used[0];
-	if (commit_left < aligned_size) {
-		U8 reg commit_size = u8_r(vm + offset_of(VArena, commit_size))[0];
-		U8 reg next_commit = reserve_left > aligned_size ? max(commit_size, aligned_size) : reserve_left;
-		if (next_commit != 0) {
-			B4 no_large = (u4_r(vm + offset_of(VArena, flags))[0] & VArenaFlag_NoLargePages) != 0;
+	U8   reg aligned_size   = align_pow2(requested_size, alignment);
+	U8_R reg commit_used    = u8_r(vm + soff(VArena, commit_used  ));
+	U8       to_be_used     = commit_used[0] + aligned_size;
+	U8   reg reserve_left   = u8_r(vm + soff(VArena, reserve      ))[0] - commit_used[0];
+	U8   reg committed      = u8_r(vm + soff(VArena, committed  ))[0];
+	U8       commit_left    = committed - commit_used[0];
+	assert(to_be_used< reserve_left);
+	if (/*exhausted?*/commit_left < aligned_size) {
+		U8 reg commit_size      = u8_r(vm + soff(VArena, commit_size))[0];
+		U8 reg next_commit_size = reserve_left > aligned_size ? max(commit_size, aligned_size) : reserve_left;
+		if (next_commit_size != 0) {
+			B4 no_large_pages = (u4_r(vm + soff(VArena, flags))[0] & VArenaFlag_NoLargePages) != 0;
 			U8 reg next_commit_start = vm + committed;
-			if (os_vmem_commit__u(next_commit_start, next_commit) == false) {
+			if (os_vmem_commit__u(next_commit_start, next_commit_size, no_large_pages) == false) {
 				struct_zero(Slice_Mem, result);
 				return;
 			}
-			committed += next_commit;
-			u8_r(vm + offset_of(VArena, committed))[0] = committed;
+			committed += next_commit_size;
+			u8_r(vm + soff(VArena, committed))[0] = committed;
 		}
 	}
-	commit_used[0] += aligned_size; {
-		U8 reg current_offset = u8_r(vm + offset_of(VArena, reserve_start))[0] + commit_used[0];
-		struct_copy(Slice_Mem, result, (U8)& slice_mem(current_offset, requested_size));
-	}
+	commit_used[0] += aligned_size;
+	U8 reg current_offset = u8_r(vm + soff(VArena, reserve_start))[0] + commit_used[0];
+	slice_assign(result, (U8)& slice_mem(current_offset, requested_size));
 }
 inline
 void varena__grow__u(U8 result, U8 vm, U8 old_ptr, U8 old_len, U8 requested_size, U8 alignment, B4 should_zero) {
 	assert(vm     != null);
 	assert(result != null);
 	U8 reg grow_amount = requested_size - old_len;
-	if (grow_amount == 0) { struct_copy(Slice_Mem, result, (U8)& slice_mem(old_ptr, old_len)); return; }
-	U8 reg current_offset = u8_r(vm + offset_of(VArena, reserve_start))[0] + u8_r(vm + offset_of(VArena, commit_used))[0];
+	if (grow_amount == 0) { slice_assign(result, (U8)& slice_mem(old_ptr, old_len)); return; }
+	U8 reg current_offset = u8_r(vm + soff(VArena, reserve_start))[0] + u8_r(vm + soff(VArena, commit_used))[0];
 	// Growing when not the last allocation not allowed
 	assert(old_ptr == current_offset); 
 	uvar(Slice_Mem, allocation); varena__push__u(vm, grow_amount, 1, alignment, u8_(allocation));
-
+	U8 reg a_ptr = u8_r(allocation + soff(Slice_Mem, ptr))[0];
+	U8 reg a_len = u8_r(allocation + soff(Slice_Mem, len))[0];
+	assert(a_ptr != 0);
+	mem_zero(a_ptr, a_len * should_zero);
+	slice_assign(result, (U8)& slice_mem(old_ptr, old_len + a_len));
 }
+inline
 void varena__shrink__u(U8 result, U8 vm, U8 old_ptr, U8 old_len, U8 requested_size, U8 alignment) {
 	assert(vm     != null);
 	assert(result != null);
-
+	U8 reg shrink_amount = old_len - requested_size;
+	if (lt_s(shrink_amount, 0)) { slice_assign(result, (U8)& slice_mem(old_ptr, old_len)); return; }
+	U8_R reg commit_used    = u8_r(vm + soff(VArena, commit_used));
+	U8   reg current_offset = u8_r(vm + soff(VArena, reserve_start))[0] + commit_used[0]; assert(old_ptr == current_offset);
+	commit_used[0]   -= shrink_amount;
+	slice_assign(result, (U8)& slice_mem(old_ptr, requested_size));
 }
 I_ void varena_release__u(U8 vm) {
 	assert(vm != null);
-	os_vmem_release__u(vm, u8_r(vm + offset_of(VArena, reserve))[0]);
+	os_vmem_release__u(vm, u8_r(vm + soff(VArena, reserve))[0]);
 }
 I_ void varena_reset__u(U8 vm) {
 	assert(vm != null);
-	u8_r(vm + offset_of(VArena, commit_used))[0] = 0;
+	u8_r(vm + soff(VArena, commit_used))[0] = 0;
 }
 I_ void varena_rewind__u(U8 vm, U8 sp_type_sig, U8 sp_slot) {
 	assert(vm       != null);
 	assert(sp_type_sig == (U8) varena_allocator_proc);
 	U8 reg header = varena_header_size();
 	if (sp_slot < header) { sp_slot = header; }
-	u8_r(vm + offset_of(VArena, commit_used))[0] = sp_slot;
+	u8_r(vm + soff(VArena, commit_used))[0] = sp_slot;
 }
 I_ void varena_save__u(U8 vm, U8 sp_addr) {
 	assert(vm   != null);
 	assert(sp_addr != null);
-	u8_r(sp_addr + offset_of(AllocatorSP, type_sig))[0] = (U8) varena_allocator_proc;
-	u8_r(sp_addr + offset_of(AllocatorSP, slot    ))[0] = u8_r(vm + offset_of(VArena, commit_used))[0];
+	u8_r(sp_addr + soff(AllocatorSP, type_sig))[0] = (U8) varena_allocator_proc;
+	u8_r(sp_addr + soff(AllocatorSP, slot    ))[0] = u8_r(vm + soff(VArena, commit_used))[0];
 }
 
 I_ VArena* varena__make(Opts_varena_make*R_ opts) {
@@ -944,17 +1007,17 @@ I_ AllocatorSP varena_save(VArena_R vm) { AllocatorSP sp; varena_save__u(u8_(vm)
 
 void varena_allocator_proc(U8 vm, U8 requested_size, U8 alignment, U8 old_ptr, U8 old_len, U4 op, U8 out_addr)
 {
-	assert(vm    != null);
+	assert(vm       != null);
 	assert(out_addr != null);
-	U8 out_allocation = out_addr ? out_addr + offset_of(AllocatorProc_Out, allocation) : 0;
+	U8 out_allocation = out_addr ? out_addr + soff(AllocatorProc_Out, allocation) : 0;
 	switch (op)
 	{
 	case AllocatorOp_Alloc:
 	case AllocatorOp_Alloc_NoZero:
 		varena__push__u(vm, requested_size, 1, alignment, out_allocation);
 		if (op == AllocatorOp_Alloc) {
-			U8 ptr = u8_r(out_allocation + offset_of(Slice_Mem, ptr))[0];
-			U8 len = u8_r(out_allocation + offset_of(Slice_Mem, len))[0];
+			U8 ptr = u8_r(out_allocation + soff(Slice_Mem, ptr))[0];
+			U8 len = u8_r(out_allocation + soff(Slice_Mem, len))[0];
 			if (ptr && len) { memory_zero(ptr, len); }
 		}
 	break;
@@ -970,32 +1033,37 @@ void varena_allocator_proc(U8 vm, U8 requested_size, U8 alignment, U8 old_ptr, U
 		varena__shrink__u(out_allocation, vm, old_ptr, old_len, requested_size, alignment);
 	break;
 
-	case AllocatorOp_Rewind:    varena_rewind__u(vm, old_ptr, old_len);                                    break;
-	case AllocatorOp_SavePoint: varena_save__u  (vm, out_addr + offset_of(AllocatorProc_Out, save_point)); break;
+	case AllocatorOp_Rewind:    varena_rewind__u(vm, old_ptr, old_len);                               break;
+	case AllocatorOp_SavePoint: varena_save__u  (vm, out_addr + soff(AllocatorProc_Out, save_point)); break;
 
 	case AllocatorOp_Query:
-			u4_r(out_addr + offset_of(AllocatorQueryInfo, features))[0] =
+			u4_r(out_addr + soff(AllocatorQueryInfo, features))[0] =
 			  AllocatorQuery_Alloc
 			| AllocatorQuery_Reset
 			| AllocatorQuery_Resize
 			| AllocatorQuery_Rewind;
-			U8 reserve   = u8_r(vm + offset_of(VArena, reserve  ))[0];
-			U8 committed = u8_r(vm + offset_of(VArena, committed))[0];
+			U8 reserve   = u8_r(vm + soff(VArena, reserve  ))[0];
+			U8 committed = u8_r(vm + soff(VArena, committed))[0];
 			U8 max_alloc = (reserve > committed) ? (reserve - committed) : 0;
-			u8_r(out_addr + offset_of(AllocatorQueryInfo, max_alloc))[0] = max_alloc;
-			u8_r(out_addr + offset_of(AllocatorQueryInfo, min_alloc))[0] = kilo(4);
-			u8_r(out_addr + offset_of(AllocatorQueryInfo, left     ))[0] = max_alloc;
-			AllocatorSP sp = { .type_sig = varena_allocator_proc, .slot = u8_r(vm + offset_of(VArena, commit_used))[0] };
-			struct_copy(AllocatorSP, out_addr + offset_of(AllocatorQueryInfo, save_point), (U8)& sp);
+			u8_r(out_addr + soff(AllocatorQueryInfo, max_alloc))[0] = max_alloc;
+			u8_r(out_addr + soff(AllocatorQueryInfo, min_alloc))[0] = kilo(4);
+			u8_r(out_addr + soff(AllocatorQueryInfo, left     ))[0] = max_alloc;
+			AllocatorSP sp = { .type_sig = varena_allocator_proc, .slot = u8_r(vm + soff(VArena, commit_used))[0] };
+			struct_assign(AllocatorSP, out_addr + soff(AllocatorQueryInfo, save_point), (U8)& sp);
 	break;
 	}
 }
 #pragma endregion VArena
 
+#pragma region Arena
+#pragma endregion Arena
+
 #pragma endregion Implementation
 
 int main(void)
 {
+	os_init();
+	VArena_R vm_file = varena_make(.reserve_size = giga(4), .flags = VArenaFlag_NoLargePages);
 	return 0;
 }
 

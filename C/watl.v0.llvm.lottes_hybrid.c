@@ -9,6 +9,9 @@ https://youtu.be/RrL7121MOeA
 */
 
 #pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wpre-c11-compat"
+// #pragma clang diagnostic ignored "-Wc++-keyword"
+#pragma clang diagnostic ignored "-Wcast-qual"
 #pragma clang diagnostic ignored "-Wunused-const-variable"
 #pragma clang diagnostic ignored "-Wunused-but-set-variable"
 #pragma clang diagnostic ignored "-Wswitch"
@@ -20,14 +23,12 @@ https://youtu.be/RrL7121MOeA
 #pragma clang diagnostic ignored "-W#pragma-messages"
 #pragma clang diagnostic ignored "-Wstatic-in-inline"
 #pragma clang diagnostic ignored "-Wkeyword-macro"
-#pragma clang diagnostic ignored "-Wc23-compat"
 #pragma clang diagnostic ignored "-Wreserved-identifier"
-#pragma clang diagnostic ignored "-Wpre-c11-compat"
+#pragma clang diagnostic ignored "-Wc23-compat"
 #pragma clang diagnostic ignored "-Wc23-extensions"
 #pragma clang diagnostic ignored "-Wunused-macros"
 #pragma clang diagnostic ignored "-Wdeclaration-after-statement"
 #pragma clang diagnostic ignored "-Wunsafe-buffer-usage"
-#pragma clang diagnostic ignored "-Wc++-keyword"
 #pragma clang diagnostic ignored "-Wimplicit-function-declaration"
 #pragma clang diagnostic ignored "-Wcast-align"
 #pragma clang diagnostic ignored "-Wunused-parameter"
@@ -39,23 +40,23 @@ https://youtu.be/RrL7121MOeA
 #pragma region Header
 
 #pragma region DSL
-#define align_(value)     __attribute__((aligned (value)))             // for easy alignment
-#define expect_(x, y)     __builtin_expect(x, y)                       // so compiler knows the common path
-#define finline           static inline __attribute__((always_inline)) // force inline
-#define no_inline         static        __attribute__((noinline))      // force no inline [used in thread api]
-#define R_                __restrict                                   // pointers are either restricted or volatile and nothing else 
-#define V_                volatile                                     // pointers are either restricted or volatile and nothing else
+#define local_persist      static
+#define global             static
+#define internal           static
+
+#define align_(value)     __attribute__((aligned (value)))               // for easy alignment
+#define expect_(x, y)     __builtin_expect(x, y)                         // so compiler knows the common path
+#define finline           internal inline __attribute__((always_inline)) // force inline
+#define no_inline         internal        __attribute__((noinline))      // force no inline [used in thread api]
+#define R_                __restrict                                     // pointers are either restricted or volatile and nothing else 
+#define V_                volatile                                       // pointers are either restricted or volatile and nothing else
 #define W_                __attribute((__stdcall__)) __attribute__((__force_align_arg_pointer__))
 
 #define glue_impl(A, B)    A ## B
 #define glue(A, B)         glue_impl(A, B)
 #define stringify_impl(S)  #S
-#define stringify(S)       stringify_impl(S)
+#define stringify(S)       cast(UTF8*, stringify_impl(S))
 #define tmpl(prefix, type) prefix ## _ ## type
-
-#define local_persist      static
-#define global             static
-#define internal           static
 
 #define static_assert      _Static_assert
 #define typeof             __typeof__
@@ -176,8 +177,8 @@ typedef def_struct(Slice_Str8) { Str8* ptr; U8 len; };
 	{                        \
 		assert_handler(        \
 			stringify(cond),     \
-			__FILE__,            \
-			__func__,            \
+			(UTF8*)__FILE__,     \
+			(UTF8*)__func__,     \
 			cast(S4, __LINE__),  \
 			msg,                 \
 			## __VA_ARGS__);     \
@@ -1100,7 +1101,6 @@ inline void  os_vmem_release(U8 vm, U8 size) { VirtualFree(cast(MS_LPVOID, vm), 
 
 #pragma region VArena (Virutal Address Space Arena)
 finline U8 varena_header_size(void) { return align_pow2(size_of(VArena), MEMORY_ALIGNMENT_DEFAULT); }
-
 inline
 VArena* varena__make(Opts_varena_make*R_ opts) {
 	assert(opts != nullptr);
@@ -1130,13 +1130,11 @@ Slice_Mem varena__push(VArena_R vm, U8 amount, U8 type_width, Opts_varena*R_ opt
 	U8 alignment      = opts->alignment ? opts->alignment : MEMORY_ALIGNMENT_DEFAULT;
 	U8 requested_size = amount * type_width;
 	U8 aligned_size   = align_pow2(requested_size, alignment);
-	U8 current_offset = vm->reserve_start + vm->commit_used;
 	U8 to_be_used     = vm->commit_used   + aligned_size;
 	U8 reserve_left   = vm->reserve       - vm->commit_used;
 	U8 commit_left    = vm->committed     - vm->commit_used;
-	B4 exhausted      = commit_left < to_be_used; assert(to_be_used < reserve_left);
-	if (exhausted)
-	{
+	assert(to_be_used < reserve_left);
+	if (/*exhausted?*/commit_left < to_be_used) {
 		U8 next_commit_size = reserve_left > 0 ?
 			max(vm->commit_size, to_be_used)
 		:	align_pow2( reserve_left, os_system_info()->target_page_size);
@@ -1149,17 +1147,17 @@ Slice_Mem varena__push(VArena_R vm, U8 amount, U8 type_width, Opts_varena*R_ opt
 		}
 	}
 	vm->commit_used = to_be_used;
+	U8 current_offset = vm->reserve_start + vm->commit_used;
 	return (Slice_Mem){.ptr = current_offset, .len = requested_size};
 }
 inline
-Slice_Mem varena__grow(VArena_R vm, Slice_Mem old_allocation, U8 requested_size, U8 alignment, B4 no_zero) {
+Slice_Mem varena__grow(VArena_R vm, Slice_Mem old_allocation, U8 requested_size, U8 alignment, B4 should_zero) {
 	U8 grow_amount = requested_size - old_allocation.len;
 	if (grow_amount == 0) { return old_allocation; }                    // Growing when not the last allocation not allowed
 	U8 current_offset = vm->reserve_start + vm->commit_used;            assert(old_allocation.ptr == current_offset); 
 	Slice_Mem allocation = varena_push_mem(vm, grow_amount, alignment); assert(allocation.ptr != 0);
-	Slice_Mem result     = (Slice_Mem){ old_allocation.ptr, requested_size + allocation.len }; 
-	mem_zero(result.ptr, result.len * no_zero);
-	return result;
+	mem_zero(allocation.ptr, allocation.len * should_zero);
+	return (Slice_Mem){ old_allocation.ptr, old_allocation.len + allocation.len }; 
 }
 finline void varena_release(VArena_R arena) { os_vmem_release(u8_(arena), arena->reserve); }
 inline

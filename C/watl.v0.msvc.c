@@ -334,9 +334,9 @@ typedef def_struct(Opts_vmem) {
 void os_init(void);
 OS_SystemInfo* os_system_info(void);
 
-inline B32   os__vmem_commit(void* vm, SSIZE size, Opts_vmem* opts);
-inline Byte* os__vmem_reserve(SSIZE size, Opts_vmem* opts);
-inline void  os_vmem_release(void* vm, SSIZE size);
+inline B32   os__vmem_commit (void* vm, SSIZE size, Opts_vmem* opts);
+inline Byte* os__vmem_reserve(          SSIZE size, Opts_vmem* opts);
+inline void  os_vmem_release (void* vm, SSIZE size);
 
 #define os_vmem_reserve(size, ...)    os__vmem_reserve(   size, opt_args(Opts_vmem, __VA_ARGS__))
 #define os_vmem_commit(vm, size, ...) os__vmem_commit(vm, size, opt_args(Opts_vmem, __VA_ARGS__))
@@ -844,7 +844,7 @@ Slice_Byte farena__push(FArena* arena, SSIZE amount, SSIZE type_width, Opts_fare
 	return (Slice_Byte){ptr, desired};
 }
 inline
-Slice_Byte farena__grow(FArena* arena, SSIZE requested_size, Slice_Byte old_allocation, SSIZE alignment, B32 no_zero) {
+Slice_Byte farena__grow(FArena* arena, SSIZE requested_size, Slice_Byte old_allocation, SSIZE alignment, B32 should_zero) {
 	// Check if the allocation is at the end of the arena
 	Byte* alloc_end = old_allocation.ptr + old_allocation.len;
 	Byte* arena_end = cast(Byte*, cast(SSIZE, arena->start) + arena->used);
@@ -861,9 +861,8 @@ Slice_Byte farena__grow(FArena* arena, SSIZE requested_size, Slice_Byte old_allo
 		return (Slice_Byte){0};
 	}
 	arena->used += aligned_grow;
-	Slice_Byte result = (Slice_Byte){old_allocation.ptr, requested_size};
-	memory_zero(old_allocation.ptr + old_allocation.len, grow_amount * cast(SSIZE, no_zero));
-	return result;
+	memory_zero(old_allocation.ptr + old_allocation.len, grow_amount * cast(SSIZE, should_zero));
+	return (Slice_Byte){old_allocation.ptr, requested_size};
 }
 inline
 Slice_Byte farena__shrink(FArena* arena, Slice_Byte old_allocation, SSIZE requested_size, SSIZE alignment) {
@@ -890,8 +889,7 @@ void farena_rewind(FArena* arena, AllocatorSP save_point) {
 }
 inline
 AllocatorSP farena_save (FArena  arena) {
-	AllocatorSP sp = { .type_sig = & farena_allocator_proc, .slot = cast(SSIZE, arena.used) };
-	return sp;
+	return (AllocatorSP){ .type_sig = & farena_allocator_proc, .slot = cast(SSIZE, arena.used) };
 }
 void farena_allocator_proc(AllocatorProc_In in, AllocatorProc_Out* out)
 {
@@ -1071,7 +1069,6 @@ Slice_Byte varena__push(VArena* vm, SSIZE amount, SSIZE type_width, Opts_varena*
 	SSIZE alignment      = opts->alignment ? opts->alignment : MEMORY_ALIGNMENT_DEFAULT;
 	SSIZE requested_size = amount * type_width;
 	SSIZE aligned_size   = align_pow2(requested_size, alignment);
-	SSIZE current_offset = vm->reserve_start + vm->commit_used;
 	SSIZE to_be_used     = vm->commit_used   + aligned_size;
 	SSIZE reserve_left   = vm->reserve       - vm->commit_used;
 	SSIZE commit_left    = vm->committed     - vm->commit_used;
@@ -1089,18 +1086,18 @@ Slice_Byte varena__push(VArena* vm, SSIZE amount, SSIZE type_width, Opts_varena*
 		}
 	}
 	vm->commit_used = to_be_used;
+	SSIZE current_offset = vm->reserve_start + vm->commit_used;
 	return (Slice_Byte){.ptr = cast(Byte*, current_offset), .len = requested_size};
 }
 inline
-Slice_Byte varena__grow(VArena* vm, SSIZE requested_size, Slice_Byte old_allocation, SSIZE alignment, B32 no_zero) {
+Slice_Byte varena__grow(VArena* vm, SSIZE requested_size, Slice_Byte old_allocation, SSIZE alignment, B32 should_zero) {
 	assert(vm != nullptr);
 	SSIZE grow_amount = requested_size - old_allocation.len;
 	if (grow_amount == 0) { return old_allocation; }                             // Growing when not the last allocation not allowed
 	SSIZE current_offset = vm->reserve_start + vm->commit_used;                  assert(old_allocation.ptr == cast(Byte*, current_offset));
 	Slice_Byte allocation = varena_push_array(vm, Byte, grow_amount, alignment); assert(allocation.ptr != nullptr);
-	Slice_Byte result     = (Slice_Byte){ old_allocation.ptr, requested_size };
-	memory_zero(allocation.ptr, allocation.len * no_zero);
-	return result;
+	memory_zero(allocation.ptr, allocation.len * should_zero);
+	return (Slice_Byte){ old_allocation.ptr, old_allocation.len + allocation.len };
 }
 inline Slice_Byte varena__shrink(VArena* vm, Slice_Byte old_allocation, SSIZE requested_size) {
 	SSIZE current_offset = vm->reserve_start + vm->commit_used;
