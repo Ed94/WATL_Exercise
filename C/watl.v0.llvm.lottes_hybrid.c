@@ -1217,13 +1217,13 @@ void varena_allocator_proc(AllocatorProc_In in, AllocatorProc_Out* out)
 #pragma endregion VArena
 
 #pragma region Arena (Chained Arena)
+finline U8 arena_header_size(void) { return align_pow2(size_of(Arena), MEMORY_ALIGNMENT_DEFAULT); }
 inline
 Arena* arena__make(Opts_arena_make*R_ opts) {
 	assert(opts != nullptr);
-	U8 header_size  = align_pow2(size_of(Arena), MEMORY_ALIGNMENT_DEFAULT);
-	VArena_R current = varena__make(opts);
-	assert(current != nullptr);
-	Arena* arena = varena_push(current, Arena); r_(arena)[0] = (Arena){
+	U8 header_size = arena_header_size();
+	VArena_R current = varena__make(opts); assert(current != nullptr);
+	Arena*   arena   = varena_push(current, Arena); r_(arena)[0] = (Arena){
 		.backing  = current,
 		.prev     = nullptr,
 		.current  = arena,
@@ -1286,9 +1286,8 @@ void arena_rewind(Arena_R arena, AllocatorSP save_point) {
 		varena_release(curr->backing);
 	}
 	arena->current = curr;
-	U8 new_pos = big_pos - curr->base_pos;
-	assert(new_pos <= curr->pos);
-	curr->pos = new_pos;
+	U8 new_pos     = big_pos - curr->base_pos; assert(new_pos <= curr->pos);
+	curr->pos      = new_pos;
 	varena_rewind(curr->backing, (AllocatorSP){varena_allocator_proc, curr->pos + size_of(VArena)});
 }
 finline AllocatorSP arena_save(Arena_R arena) { return (AllocatorSP){arena_allocator_proc, arena->base_pos + arena->current->pos}; }

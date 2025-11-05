@@ -6,9 +6,6 @@ Toolchain: LLVM (2025-08-30), C-Stanard: 11
 
 Following strictly: Neokineogfx - Fixing C
 https://youtu.be/RrL7121MOeA
-
-Unlike lottes_hybrid this file will be entirely untyped for any pointer addressing.
-Win CRT imports will also be typeless signatures.
 */
 
 #pragma clang diagnostic push
@@ -133,7 +130,7 @@ enum { false = 0, true  = 1, true_overflow, };
 #define pcast(type, data)                   cast(type*, & (data))[0]
 #define nullptr                             cast(void*, 0)
 #define null                                cast(U8,    0)
-#define soff(type, member)                  cast(U8, & (((type*) 0)->member))
+#define soff(type, member)                  cast(U8, & (((type*) 0)->member)) // offset_of
 #define size_of(data)                       cast(U8, sizeof(data))
 
 #define r_(ptr)                             cast(typeof_ptr(ptr)*R_, ptr)
@@ -459,7 +456,7 @@ typedef def_struct(FArena) {
 I_ void farena_init__u  (U8 arena, U8 mem_ptr, U8 mem_len);
    void farena__push__u (U8 arena, U8 amount, U8 type_width, U8 alignment, U8 slice_addr);
 I_ void farena_reset__u (U8 arena);
-I_ void farena_rewind__u(U8 arena, U8 sp_type_sig, U8 sp_slot);
+I_ void farena_rewind__u(U8 arena, U8 sp_slot);
 I_ void farena_save__u  (U8 arena, U8 sp);
 
 I_ FArena      farena_make  (Slice_Mem mem);
@@ -526,7 +523,7 @@ typedef def_struct(Opts_varena_make) {
    U8   varena__make__u  (U8 reserve_size, U8 commit_size, U4 flags, U8 base_addr);
 I_ void varena_release__u(U8 arena);
 I_ void varena_reset__u  (U8 arena);
-I_ void varena_rewind__u (U8 arena,  U8 sp_type_sig, U8 sp_slot);
+I_ void varena_rewind__u (U8 arena,  U8 sp_slot);
 I_ void varena_save__u   (U8 arena,  U8 sp_addr);
    void varena__push__u  (U8 arena,  U8 amount, U8 type_width, U8 alignment, U8 slice_addr);
    void varena__grow__u  (U8 result, U8 arena,  U8 old_ptr, U8 old_len, U8 requested_size, U8 alignment, B4 should_zero);
@@ -556,7 +553,48 @@ cast(type*, varena__push(arena, size_of(type), 1, opt_args(Opts_varena, __VA_ARG
 #pragma endregion VArena
 
 #pragma region Arena
+typedef Opts_varena Opts_arena;
+typedef def_enum(U4, ArenaFlags) {
+	ArenaFlag_NoLargePages = (1 << 0),
+	ArenaFlag_NoChain      = (1 << 1),
+};
+typedef def_struct(Arena) {
+	VArena*    backing;
+	Arena*     prev;
+	Arena*     current;
+	U8         base_pos;
+	U8         pos;
+	ArenaFlags flags;
+	A4_B1 _PAD_;
+};
 
+U8   arena_make__u   (U8 reserve_size, U8 commit_size, U4 flags, U8 base_addr);
+void arena__push__u  (U8 arena, U8 amount, U8 type_width, U8 alignemnt, U8 out_mem);
+void arena_release__u(U8 arena);
+void arena_reset__u  (U8 arena);
+void arena_rewind__u (U8 arena, U8 slot);
+void arena_save__u   (U8 arena, U8 out_sp);
+
+typedef Opts_varena_make Opts_arena_make;
+   Arena*      arena__make  (Opts_arena_make*R_ opts);
+   Slice_Mem   arena__push  (Arena_R arena, U8 amount, U8 type_width, Opts_arena*R_ opts);
+I_ void        arena_release(Arena_R arena);
+I_ void        arena_reset  (Arena_R arena);
+   void        arena_rewind (Arena_R arena, AllocatorSP save_point);
+I_ AllocatorSP arena_save   (Arena_R arena);
+
+void arena_allocator_proc(U8 data, U8 requested_size, U8 alignment, U8 old_ptr, U8 old_len, U4 op, /*AllocatorProc_Out*/U8 out);
+#define ainfo_arena(arena) (AllocatorInfo){ .proc = & arena_allocator_proc, .data = u8_(arena) }
+
+#define arena_make(...) arena__make(opt_args(Opts_arena_make, __VA_ARGS__))
+
+#define arena_push_mem(arena, amount, ...) arena__push(arena, amount, 1, opt_args(Opts_arena, lit(stringify(B1)), __VA_ARGS__))
+
+#define arena_push(arena, type, ...) \
+cast(type*, arena__push(arena, 1, size_of(type), opt_args(Opts_arena, lit(stringify(type)), __VA_ARGS__) ).ptr)
+
+#define arena_push_array(arena, type, amount, ...) \
+(tmpl(Slice,type)){ arena__push(arena, size_of(type), amount, opt_args(Opts_arena, lit(stringify(type)), __VA_ARGS__)).ptr, amount }
 #pragma endregion Arena
 
 #pragma region Hashing
@@ -581,6 +619,43 @@ I_ void hash64__fnv1a(U8_R hash, Slice_Mem data, Opts_hash64_fnv1a*R_ opts) {
 }
 #define hash64_fnv1a(hash, data, ...) hash64__fnv1a(hash, data, opt_args(Opts_hash64_fnv1a, __VA_ARGS__))
 #pragma endregion Hashing
+
+#pragma region Key Table Linear (KTL)
+#define def_KTL_Slot(type)        \
+def_struct(tmpl(KTL_Slot,type)) { \
+	U8   key;   \
+	type value; \
+}
+#define def_KTL(type)             \
+	def_Slice(tmpl(KTL_Slot,type)); \
+	typedef tmpl(Slice_KTL_Slot,type) tmpl(KTL,type)
+
+typedef Slice_Mem  KTL_Byte;
+typedef def_struct(KTL_Meta) {
+	U8   slot_size;
+	U8   kt_value_offset;
+	U8   type_width;
+	Str8 type_name;
+};
+
+typedef def_farray(Str8, 2);
+typedef def_Slice(A2_Str8);
+typedef def_KTL_Slot(Str8);
+typedef def_KTL(Str8);
+void ktl_populate_slice_a2_str8(U8 kt, U8 backing_proc, U8 backing_data, U8 values);
+#pragma endregion KTL
+
+#pragma region Key Table 1-Layer Chained-Chunked-Cells (KT1CX)
+#pragma endregion KT1CX
+
+#pragma region String Operations
+#pragma endregion String Operations
+
+#pragma region FIle System
+#pragma endregion FIle System
+
+#pragma region WATL
+#pragma endregion WATL
 
 #pragma endregion Header
 
@@ -727,8 +802,7 @@ inline void farena__shrink__u(U8 result, U8 arena, U8 old_ptr, U8 old_len, U8 re
 	slice_assign_comp(result, old_ptr, requested_size);
 }
 I_ void farena_reset__u(U8 arena) { u8_r(arena + soff(FArena, used))[0] = 0; }
-I_ void farena_rewind__u(U8 arena, U8 sp_type_sig, U8 sp_slot) {
-	assert(sp_type_sig == (U8)& farena_allocator_proc);
+I_ void farena_rewind__u(U8 arena, U8 sp_slot) {
 	U8   start = u8_r(arena + soff(FArena, start))[0];
 	U8_R used  = u8_r(arena + soff(FArena, used));
 	U8   end   = start + used[0]; assert_bounds(sp_slot, start, end);
@@ -745,38 +819,38 @@ void farena_allocator_proc(U8 arena, U8 requested_size, U8 alignment, U8 old_ptr
 	U8 allocation = arena + soff(AllocatorProc_Out, allocation);
 	switch (op)
 	{
-		case AllocatorOp_Alloc:
-		case AllocatorOp_Alloc_NoZero:
-			farena__push__u(arena, requested_size, 1, alignment, allocation);
-			mem_zero(u8_r(allocation + soff(Slice_Mem, ptr))[0], u8_r(allocation + soff(Slice_Mem, len))[0] * op);
-		break;
-		case AllocatorOp_Free:                       break;
-		case AllocatorOp_Reset: farena_reset__u(arena); break;
+	case AllocatorOp_Alloc:
+	case AllocatorOp_Alloc_NoZero:
+		farena__push__u(arena, requested_size, 1, alignment, allocation);
+		mem_zero(u8_r(allocation + soff(Slice_Mem, ptr))[0], u8_r(allocation + soff(Slice_Mem, len))[0] * op);
+	break;
+	case AllocatorOp_Free:                       break;
+	case AllocatorOp_Reset: farena_reset__u(arena); break;
 
-		case AllocatorOp_Grow:
-		case AllocatorOp_Grow_NoZero:
-			farena__grow__u(allocation, arena, old_ptr, old_len, requested_size, alignment, op - AllocatorOp_Grow_NoZero);
-		break;
-		case AllocatorOp_Shrink:
-			farena__shrink__u(allocation, arena, old_ptr, old_len, requested_size, alignment);
-		break;
+	case AllocatorOp_Grow:
+	case AllocatorOp_Grow_NoZero:
+		farena__grow__u(allocation, arena, old_ptr, old_len, requested_size, alignment, op - AllocatorOp_Grow_NoZero);
+	break;
+	case AllocatorOp_Shrink:
+		farena__shrink__u(allocation, arena, old_ptr, old_len, requested_size, alignment);
+	break;
 
-		case AllocatorOp_Rewind:    farena_rewind__u(arena, old_ptr, old_len); break;
-		case AllocatorOp_SavePoint: farena_save__u(arena, allocation);         break;
+	case AllocatorOp_Rewind:    farena_rewind__u(arena, old_len); break;
+	case AllocatorOp_SavePoint: farena_save__u(arena, allocation);         break;
 
-		case AllocatorOp_Query:
-			u4_r(out + soff(AllocatorQueryInfo, features))[0] =
-			  AllocatorQuery_Alloc
-			| AllocatorQuery_Reset
-			| AllocatorQuery_Resize
-			| AllocatorQuery_Rewind
-			;
-			U8 max_alloc = u8_r(arena + soff(FArena, capacity))[0] - u8_r(arena + soff(FArena, used))[0];
-			u8_r(out + soff(AllocatorQueryInfo, max_alloc))[0] = max_alloc;
-			u8_r(out + soff(AllocatorQueryInfo, min_alloc))[0] = 0;
-			u8_r(out + soff(AllocatorQueryInfo, left     ))[0] = max_alloc;
-			farena_save__u(arena, out + soff(AllocatorQueryInfo, save_point));
-		break;
+	case AllocatorOp_Query:
+		u4_r(out + soff(AllocatorQueryInfo, features))[0] =
+			AllocatorQuery_Alloc
+		| AllocatorQuery_Reset
+		| AllocatorQuery_Resize
+		| AllocatorQuery_Rewind
+		;
+		U8 max_alloc = u8_r(arena + soff(FArena, capacity))[0] - u8_r(arena + soff(FArena, used))[0];
+		u8_r(out + soff(AllocatorQueryInfo, max_alloc))[0] = max_alloc;
+		u8_r(out + soff(AllocatorQueryInfo, min_alloc))[0] = 0;
+		u8_r(out + soff(AllocatorQueryInfo, left     ))[0] = max_alloc;
+		farena_save__u(arena, out + soff(AllocatorQueryInfo, save_point));
+	break;
 	}
 	return;
 }
@@ -969,9 +1043,8 @@ I_ void varena_reset__u(U8 vm) {
 	assert(vm != null);
 	u8_r(vm + soff(VArena, commit_used))[0] = 0;
 }
-I_ void varena_rewind__u(U8 vm, U8 sp_type_sig, U8 sp_slot) {
+I_ void varena_rewind__u(U8 vm, U8 sp_slot) {
 	assert(vm       != null);
-	assert(sp_type_sig == (U8) varena_allocator_proc);
 	U8 header = varena_header_size();
 	if (sp_slot < header) { sp_slot = header; }
 	u8_r(vm + soff(VArena, commit_used))[0] = sp_slot;
@@ -1002,7 +1075,8 @@ I_ void varena_release(VArena_R vm) { varena_release__u(u8_(vm)); }
 I_ void varena_reset  (VArena_R vm) { varena_reset__u  (u8_(vm)); }
 
 I_ void varena_rewind (VArena_R vm, AllocatorSP save_point) { 
-	varena_rewind__u(u8_(vm), u8_(save_point.type_sig), save_point.slot);
+	assert(save_point.type_sig == varena_allocator_proc);
+	varena_rewind__u(u8_(vm), save_point.slot);
 }
 I_ AllocatorSP varena_save(VArena_R vm) { AllocatorSP sp; varena_save__u(u8_(vm), u8_(& sp)); return sp; }
 
@@ -1034,7 +1108,7 @@ void varena_allocator_proc(U8 vm, U8 requested_size, U8 alignment, U8 old_ptr, U
 		varena__shrink__u(out_allocation, vm, old_ptr, old_len, requested_size, alignment);
 	break;
 
-	case AllocatorOp_Rewind:    varena_rewind__u(vm, old_ptr, old_len);                               break;
+	case AllocatorOp_Rewind:    varena_rewind__u(vm, old_len);                               break;
 	case AllocatorOp_SavePoint: varena_save__u  (vm, out_addr + soff(AllocatorProc_Out, save_point)); break;
 
 	case AllocatorOp_Query:
@@ -1057,7 +1131,131 @@ void varena_allocator_proc(U8 vm, U8 requested_size, U8 alignment, U8 old_ptr, U
 #pragma endregion VArena
 
 #pragma region Arena
+I_ U8 arena_header_size(void) { return align_pow2(size_of(Arena), MEMORY_ALIGNMENT_DEFAULT); }
+
+U8 arena_make__u(U8 reserve_size, U8 commit_size, U4 flags, U8 base_addr) {
+	U8 header_size = arena_header_size();
+	U8 current     = varena__make__u(reserve_size, commit_size, flags, base_addr); assert(current != null);
+	U8 arena; varena__push__u(current, header_size, 1, MEMORY_ALIGNMENT_DEFAULT, (U8)& arena);
+	u8_r(arena + soff(Arena, backing ))[0] = current;
+	u8_r(arena + soff(Arena, prev    ))[0] = null;
+	u8_r(arena + soff(Arena, current ))[0] = arena;
+	u8_r(arena + soff(Arena, base_pos))[0] = 0;
+	u8_r(arena + soff(Arena, pos     ))[0] = header_size;
+	u8_r(arena + soff(Arena, flags   ))[0] = flags;
+	return arena;
+}
+void arena__push__u(U8 arena, U8 amount, U8 type_width, U8 alignment, U8 out_mem) {
+	assert(arena != null);
+	U8 active          = u8_r(arena + soff(Arena, current ))[0];
+	U8 size_requested  = amount * type_width;
+	   alignment       = alignment ? alignment : MEMORY_ALIGNMENT_DEFAULT;
+	U8 size_aligned    = align_pow2(size_requested, alignment);
+	U8 pos_pre         = u8_r(active + soff(Arena, pos))[0];
+	U8 pos_pst         = pos_pre + size_aligned;
+	U8 backing         = active + soff(Arena, backing);
+	U8 reserve         = u8_r(backing + soff(VArena, reserve))[0];
+	B4 should_chain    = 
+     ((u8_r(arena + soff(Arena, flags))[0] & ArenaFlag_NoChain) == 0)
+	&& reserve < pos_pst;
+	if (should_chain)
+	{
+		U8 current   = arena + soff(Arena, current);
+		U8 new_arena = arena_make__u(
+			reserve, 
+			u8_r(backing + soff(VArena, commit_size))[0], 
+			u4_r(backing + soff(VArena, flags      ))[0], 
+			0
+		);
+		u8_r(new_arena + soff(Arena, base_pos))[0] = u8_r(active + soff(Arena, base_pos))[0] + reserve;
+		u8_r(new_arena + soff(Arena, prev    ))[0] = u8_r(current)[0];
+		u8_r(current)[0]                           = new_arena;
+		active                                     = u8_r(current)[0];
+	}
+	U8 result = active + pos_pre;
+	varena__push__u(u8_r(backing)[0], size_aligned, 1, alignment, out_mem);
+	assert(u8_r(out_mem + soff(Slice_Mem, ptr))[0] == result);
+	assert(u8_r(out_mem + soff(Slice_Mem, len))[0] >  0);
+	u8_r(active + soff(Arena, pos))[0] = pos_pst;
+}
+I_ void arena_release__u(U8 arena) {
+	assert(arena != null);
+	U8 curr = arena + soff(Arena, current); 
+	U8 prev = null;
+	for (; u8_r(curr)[0] != null; curr = prev) {
+		u8_r(prev)[0] = u8_r(curr + soff(Arena, prev))[0];
+		varena_release__u(u8_r(curr)[0]);
+	}
+}
+I_ void arena_reset__u(U8 arena) { arena_rewind__u(arena, 0); }
+void arena_rewind__u(U8 arena, U8 slot) {
+	assert(arena != null);
+	U8 header_size = arena_header_size();
+	U8 curr        = arena + soff(Arena, current);
+	U8 big_pos     = clamp_bot(header_size, slot);
+	for (U8 prev = null; u8_r(curr, soff(Arena, base_pos))[0] >= big_pos; u8_r(curr) = prev) {
+		prev = u8_r(curr + soff(Arena, prev))[0];
+		varena_release__u(u8_r(curr + soff(Arena, backing))[0]);
+	}
+	u8_r(arena + soff(Arena, current))[0] = u8_r(curr)[0];
+	U8 new_pos = big_pos - u8_r(curr + soff(Arena, base_pos))[0]; assert(new_pos <= u8_r(curr + soff(Arena, pos))[0]);
+	u8_r(curr + soff(Arena, pos))[0] = new_pos;
+}
+I_ void arena_save__u(U8 arena, U8 out_sp) {
+	u8_r(out_sp + soff(AllocatorSP, type_sig))[0] = arena_allocator_proc;
+	u8_r(out_sp + soff(AllocatorSP, slot    ))[0] = 
+	    u8_r(arena + soff(Arena, base_pos)                  )[0] 
+		+ u8_r(arena + soff(Arena, current) + soff(Arena, pos))[0];
+}
+void arena_allocator_proc(U8 arena, U8 requested_size, U8 alignment, U8 old_ptr, U8 old_len, U4 op, U8 out_addr)
+{
+	assert(out_addr != null);
+	assert(arena    != null);
+	switch (op)
+	{
+	case AllocatorOp_Alloc:
+	case AllocatorOp_Alloc_NoZero:
+	break;
+
+	case AllocatorOp_Free: break;
+	case AllocatorOp_Reset: break;
+
+	case AllocatorOp_Grow:
+	case AllocatorOp_Grow_NoZero: break;
+	case AllocatorOp_Shrink: break;
+
+	case AllocatorOp_Rewind: break;
+	case AllocatorOp_SavePoint: break;
+
+	case AllocatorOp_Query:
+	break;
+	}
+}
 #pragma endregion Arena
+
+#pragma region Key Table Linear (KTL)
+I_ void ktl_populate_slice_a2_str8(U8 kt, U8 backing_ptr, U8 backing_len, U8 values) {
+	assert(kt != null);
+	U8 values_len = u8_r(values + soff(Slice_A2_Str8, len))[0];
+	if (values_len == 0) return;
+	mem__alloc__u(kt, backing_ptr, backing_len, size_of(KTL_Slot_Str8) * values_len, 0, false);
+	for (U8 id = 0; id < values_len; ++id) { 
+		U8 kt_slot = kt + soff(KTL_Str8, ptr) * id; 
+		U8 value   = u8_r(values + soff(Slice_A2_Str8, ptr))[0] + size_of(A2_Str8) * id;
+		mem_copy        (kt_slot + soff(KTL_Slot_Str8, value), value + size_of(Str8) * 1, size_of(Str8));
+		hash64__fnv1a__u(kt_slot + soff(KTL_Slot_Str8, key),   value);
+	}
+}
+#pragma endregion KTL
+
+#pragma region Key Table 1-Layer Chained-Chunked_Cells (KT1CX)
+#pragma endregion Key Table
+
+#pragma region String Operations
+#pragma endregion String Operations
+
+#pragma region File System
+#pragma endregion File System
 
 #pragma region Debug
 #if defined(BUILD_DEBUG)
@@ -1115,13 +1313,49 @@ void assert_handler( UTF8*R_ condition, UTF8*R_ file, UTF8*R_ function, S4 line,
 #endif
 #pragma endregion Debug
 
+#pragma region WATL
+#pragma endregion WATL
+
 #pragma endregion Implementation
 
 int main(void)
 {
 	os_init();
 	VArena_R vm_file = varena_make(.reserve_size = giga(4), .flags = VArenaFlag_NoLargePages);
-	return 0;
+	// FileOpInfo file  = file_read_contents(lit("watl.v0.llvm.lottes.c"), .backing = ainfo_varena(vm_file));
+	// slice_assert(file.content);
+
+	Arena_R a_msgs = arena_make();
+	Arena_R a_toks = arena_make();
+	// WATL_LexInfo lex_res = watl_lex(pcast(Str8, file.content),
+	// 	.ainfo_msgs = ainfo_arena(a_msgs),
+	// 	.ainfo_toks = ainfo_arena(a_toks),
+	// );
+	// assert((lex_res.signal & WATL_LexStatus_MemFail_SliceConstraintFail) == 0);
+
+	// Arena_R str_cache_kt1_ainfo = arena_make();
+	// Str8Cache str_cache = str8cache_make(
+	// 	.str_reserve    = ainfo_arena(arena_make(.reserve_size = mega(256))),
+	// 	.cell_reserve   = ainfo_arena(str_cache_kt1_ainfo),
+	// 	.tbl_backing    = ainfo_arena(str_cache_kt1_ainfo),
+	// 	.cell_pool_size = kilo(8),
+	// 	.table_size     = kilo(64),
+	// );
+
+	// Arena_R a_lines = arena_make();
+	// WATL_ParseInfo parse_res = watl_parse(lex_res.toks,
+	// 	.ainfo_msgs  = ainfo_arena(a_msgs),
+	// 	.ainfo_nodes = ainfo_arena(a_toks),
+	// 	.ainfo_lines = ainfo_arena(a_lines),
+	// 	.str_cache   = & str_cache
+	// );
+	// assert((parse_res.signal & WATL_ParseStatus_MemFail_SliceConstraintFail) == 0);
+
+	// arena_reset(a_msgs);
+	// arena_reset(a_toks);
+	// Str8 listing = watl_dump_listing(ainfo_arena(a_msgs), parse_res.lines);
+	// file_write_str8(lit("watl.v0.lottes.c.listing.txt"), listing);
+	// return 0;
 }
 
 #pragma clang diagnostic pop
