@@ -117,8 +117,8 @@ $compiler_args += $flag_full_src_path
 # $compiler_args += $flag_optimize_speed_max
 # $compiler_args += $flag_optimize_fast
 # $compiler_args += $flag_optimize_size
-# $compiler_args += $flag_optimize_intrinsics
-$compiler_args += $flag_no_optimization
+$compiler_args += $flag_optimize_intrinsics
+# $compiler_args += $flag_no_optimization
 
 # Debug setup
 $compiler_args += ($flag_define + 'BUILD_DEBUG')
@@ -139,7 +139,10 @@ $compiler_args += $flag_compile, $unit
 $compiler_args | ForEach-Object { Write-Host $_ }
 
 # Compile the unit
-& $compiler $compiler_args
+$compilation_time = Measure-Command { 
+	& $compiler $compiler_args 
+}
+write-host "Compilation took $($compilation_time.TotalMilliseconds)ms"
 write-host
 
 $binary = join-path $path_build "$unit_name.exe"
@@ -168,8 +171,9 @@ if ($true) {
 	# Diagnoistc print for the args
 	$linker_args | ForEach-Object { Write-Host $_ }
 
-	& $linker $linker_args
+	$linking_time = Measure-Command { & $linker $linker_args }
 	# & $radlink $linker_args
+	write-host "Linking took $($linking_time.TotalMilliseconds)ms"
 	write-host
 }
 

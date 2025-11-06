@@ -58,11 +58,6 @@ enum { false = 0, true  = 1, true_overflow, };
 #define offset_of(type, member)             cast(SSIZE, & (((type*) 0)->member))
 #define size_of(data)                       cast(SSIZE, sizeof(data))
 
-// Not using this since its lottes related.
-// #define R_                                  __restrict  
-// #define V_                                  volatile
-// #define r_(ptr)                             cast(typeof_ptr(ptr)*R_, ptr)
-// #define v_(ptr)                             cast(typeof_ptr(ptr)*V_, ptr)
 #define ssize(value)                        cast(SSIZE, value)
 
 #define kilo(n)                             (cast(SSIZE, n) << 10)
@@ -104,12 +99,40 @@ typedef def_struct(Slice_Str8) { Str8* ptr; SSIZE len; };
 		debug_trap();          \
 	}                        \
 } while(0)
-void assert_handler( char const* condition, char const* file, char const* function, S32 line, char const* msg, ... );
+internal void assert_handler( char const* condition, char const* file, char const* function, S32 line, char const* msg, ... );
 #endif
 #pragma endregion Debug
 
 #pragma region Memory
-inline SSIZE align_pow2(SSIZE x, SSIZE b);
+// #include <memory.h>
+void* __cdecl memcpy (void* _Dst, void const* _Src, USIZE _Size);
+void* __cdecl memmove(void* _Dst, void const* _Src, USIZE _Size);
+void* __cdecl memset (void* _Dst, int         _Val, USIZE _Size);
+
+internal inline
+SSIZE align_pow2(SSIZE x, SSIZE b) {
+    assert(b != 0);
+    assert((b & (b - 1)) == 0);  // Check power of 2
+    return ((x + b - 1) & (~(b - 1)));
+}
+internal inline
+void* mem_copy(void* restrict dest, void const* restrict src, USIZE length) {
+	if (dest == nullptr || src == nullptr) { return nullptr; }
+	memcpy(dest, src, length);
+	return dest;
+}
+internal inline
+void* memory_copy_overlapping(void* restrict dest, void const* restrict src, USIZE length) {
+	if (dest == nullptr || src == nullptr) { return nullptr; }
+	memmove(dest, src, length);
+	return dest;
+}
+internal inline
+B32 mem_zero(void* dest, USIZE length) {
+	if (dest == nullptr) return false;
+	memset((unsigned char*)dest, 0, length);
+	return true;
+}
 
 #define align_struct(type_width) ((SSIZE)(((type_width) + 7) / 8 * 8))
 
@@ -117,10 +140,6 @@ inline SSIZE align_pow2(SSIZE x, SSIZE b);
 	assert(ssize(start) <= ssize(point));       \
 	assert(ssize(point) <= ssize(end));         \
 } while(0)
-
-void* memory_copy            (void* restrict dest, void const* restrict src, USIZE length);
-void* memory_copy_overlapping(void* restrict dest, void const* restrict src, USIZE length);
-B32   memory_zero            (void* dest, USIZE length);
 
 #define check_nil(nil, p) ((p) == 0 || (p) == nil)
 #define set_nil(nil, p)   ((p) = nil)
@@ -156,8 +175,14 @@ typedef def_Slice(Byte);
 #define slice_fmem(mem)        ((Slice_Byte){ mem, size_of(mem) })
 #define slice_to_bytes(slice)  ((Slice_Byte){cast(Byte*, (slice).ptr), (slice).len * size_of_slice_type(slice)})
 
-void slice__copy(Slice_Byte dest, SSIZE dest_typewidth, Slice_Byte src, SSIZE src_typewidth);
-void slice__zero(Slice_Byte mem, SSIZE typewidth);
+internal inline void slice__zero(Slice_Byte mem, SSIZE typewidth) { slice_assert(mem); mem_zero(mem.ptr, mem.len); }
+internal inline
+void slice__copy(Slice_Byte dest, SSIZE dest_typewidth, Slice_Byte src, SSIZE src_typewidth) {
+	assert(dest.len >= src.len);
+	slice_assert(dest);
+	slice_assert(src);
+	mem_copy(dest.ptr, src.ptr, src.len);
+}
 #define slice_copy(dest, src) do {       \
 	static_assert(typeof_same(dest, src)); \
 	slice__copy(slice_to_bytes(dest),  size_of_slice_type(dest), slice_to_bytes(src), size_of_slice_type(src)); \
@@ -271,20 +296,20 @@ static_assert(size_of(AllocatorProc_Out) == size_of(AllocatorQueryInfo));
 
 AllocatorQueryInfo allocator_query(AllocatorInfo ainfo);
 
-void        mem_free      (AllocatorInfo ainfo, Slice_Byte mem);
-void        mem_reset     (AllocatorInfo ainfo);
-void        mem_rewind    (AllocatorInfo ainfo, AllocatorSP save_point);
-AllocatorSP mem_save_point(AllocatorInfo ainfo);
+internal void        mem_free      (AllocatorInfo ainfo, Slice_Byte mem);
+internal void        mem_reset     (AllocatorInfo ainfo);
+internal void        mem_rewind    (AllocatorInfo ainfo, AllocatorSP save_point);
+internal AllocatorSP mem_save_point(AllocatorInfo ainfo);
 
 typedef def_struct(Opts_mem_alloc)  { SSIZE alignment; B32 no_zero; byte_pad(4); };
 typedef def_struct(Opts_mem_grow)   { SSIZE alignment; B32 no_zero; B32 give_actual; };
 typedef def_struct(Opts_mem_shrink) { SSIZE alignment; };
 typedef def_struct(Opts_mem_resize) { SSIZE alignment; B32 no_zero; B32 give_actual; };
 
-Slice_Byte mem__alloc (AllocatorInfo ainfo,                 SSIZE size, Opts_mem_alloc*  opts);
-Slice_Byte mem__grow  (AllocatorInfo ainfo, Slice_Byte mem, SSIZE size, Opts_mem_grow*   opts);
-Slice_Byte mem__resize(AllocatorInfo ainfo, Slice_Byte mem, SSIZE size, Opts_mem_resize* opts);
-Slice_Byte mem__shrink(AllocatorInfo ainfo, Slice_Byte mem, SSIZE size, Opts_mem_shrink* opts);
+internal Slice_Byte mem__alloc (AllocatorInfo ainfo,                 SSIZE size, Opts_mem_alloc*  opts);
+internal Slice_Byte mem__grow  (AllocatorInfo ainfo, Slice_Byte mem, SSIZE size, Opts_mem_grow*   opts);
+internal Slice_Byte mem__resize(AllocatorInfo ainfo, Slice_Byte mem, SSIZE size, Opts_mem_resize* opts);
+internal Slice_Byte mem__shrink(AllocatorInfo ainfo, Slice_Byte mem, SSIZE size, Opts_mem_shrink* opts);
 
 #define mem_alloc(ainfo, size, ...)       mem__alloc (ainfo,      size, opt_args(Opts_mem_alloc,  __VA_ARGS__))
 #define mem_grow(ainfo,   mem, size, ...) mem__grow  (ainfo, mem, size, opt_args(Opts_mem_grow,   __VA_ARGS__))
@@ -305,12 +330,12 @@ typedef def_struct(FArena) {
 	SSIZE capacity;
 	SSIZE used;
 };
-FArena      farena_make  (Slice_Byte mem);
-void        farena_init  (FArena* arena, Slice_Byte byte);
-Slice_Byte  farena__push (FArena* arena, SSIZE amount, SSIZE type_width, Opts_farena* opts);
-void        farena_reset (FArena* arena);
-void        farena_rewind(FArena* arena, AllocatorSP save_point);
-AllocatorSP farena_save  (FArena  arena);
+internal FArena      farena_make  (Slice_Byte mem);
+internal void        farena_init  (FArena* arena, Slice_Byte byte);
+internal Slice_Byte  farena__push (FArena* arena, SSIZE amount, SSIZE type_width, Opts_farena* opts);
+internal void        farena_reset (FArena* arena);
+internal void        farena_rewind(FArena* arena, AllocatorSP save_point);
+internal AllocatorSP farena_save  (FArena  arena);
 
 void farena_allocator_proc(AllocatorProc_In in, AllocatorProc_Out* out);
 #define ainfo_farena(arena) (AllocatorInfo){ .proc = farena_allocator_proc, .data = & arena }
@@ -331,12 +356,12 @@ typedef def_struct(Opts_vmem) {
 	B32   no_large_pages;
 	byte_pad(4);
 };
-void os_init(void);
-OS_SystemInfo* os_system_info(void);
+internal void           os_init       (void);
+internal OS_SystemInfo* os_system_info(void);
 
-inline B32   os__vmem_commit (void* vm, SSIZE size, Opts_vmem* opts);
-inline Byte* os__vmem_reserve(          SSIZE size, Opts_vmem* opts);
-inline void  os_vmem_release (void* vm, SSIZE size);
+internal inline B32   os__vmem_commit (void* vm, SSIZE size, Opts_vmem* opts);
+internal inline Byte* os__vmem_reserve(          SSIZE size, Opts_vmem* opts);
+internal inline void  os_vmem_release (void* vm, SSIZE size);
 
 #define os_vmem_reserve(size, ...)    os__vmem_reserve(   size, opt_args(Opts_vmem, __VA_ARGS__))
 #define os_vmem_commit(vm, size, ...) os__vmem_commit(vm, size, opt_args(Opts_vmem, __VA_ARGS__))
@@ -363,17 +388,17 @@ typedef def_struct(Opts_varena_make) {
 	VArenaFlags flags;
 	byte_pad(4);
 };
-VArena* varena__make(Opts_varena_make* opts);
+internal VArena* varena__make(Opts_varena_make* opts);
 #define varena_make(...) varena__make(opt_args(Opts_varena_make, __VA_ARGS__))
 
-Slice_Byte  varena__push  (VArena* arena, SSIZE amount, SSIZE type_width, Opts_varena* opts);
-void        varena_release(VArena* arena);
-void        varena_rewind (VArena* arena, AllocatorSP save_point);
-void        varena_reset  (VArena* arena);
-Slice_Byte  varena__shrink(VArena* arena, Slice_Byte old_allocation, SSIZE requested_size);
-AllocatorSP varena_save   (VArena* arena);
+internal Slice_Byte  varena__push  (VArena* arena, SSIZE amount, SSIZE type_width, Opts_varena* opts);
+internal void        varena_release(VArena* arena);
+internal void        varena_rewind (VArena* arena, AllocatorSP save_point);
+internal void        varena_reset  (VArena* arena);
+internal Slice_Byte  varena__shrink(VArena* arena, Slice_Byte old_allocation, SSIZE requested_size);
+internal AllocatorSP varena_save   (VArena* arena);
 
-void varena_allocator_proc(AllocatorProc_In in, AllocatorProc_Out* out);
+internal void varena_allocator_proc(AllocatorProc_In in, AllocatorProc_Out* out);
 #define ainfo_varena(varena) (AllocatorInfo) { .proc = & varena_allocator_proc, .data = varena }
 
 #define varena_push(arena, type, ...) \
@@ -399,14 +424,14 @@ typedef def_struct(Arena) {
 	byte_pad(4);
 };
 typedef Opts_varena_make Opts_arena_make;
-Arena*      arena__make  (Opts_arena_make* opts);
-Slice_Byte  arena__push  (Arena* arena, SSIZE amount, SSIZE type_width, Opts_arena* opts);
-void        arena_release(Arena* arena);
-void        arena_reset  (Arena* arena);
-void        arena_rewind (Arena* arena, AllocatorSP save_point);
-AllocatorSP arena_save   (Arena* arena);
+internal Arena*      arena__make  (Opts_arena_make* opts);
+internal Slice_Byte  arena__push  (Arena* arena, SSIZE amount, SSIZE type_width, Opts_arena* opts);
+internal void        arena_release(Arena* arena);
+internal void        arena_reset  (Arena* arena);
+internal void        arena_rewind (Arena* arena, AllocatorSP save_point);
+internal AllocatorSP arena_save   (Arena* arena);
 
-void arena_allocator_proc(AllocatorProc_In in, AllocatorProc_Out* out);
+internal void arena_allocator_proc(AllocatorProc_In in, AllocatorProc_Out* out);
 #define ainfo_arena(arena) (AllocatorInfo){ .proc = & arena_allocator_proc, .data = arena }
 
 #define arena_make(...) arena__make(opt_args(Opts_arena_make, __VA_ARGS__))
@@ -420,7 +445,7 @@ cast(type*, arena__push(arena, 1, size_of(type), opt_args(Opts_arena, lit(string
 
 #pragma region Hashing
 typedef def_struct(Opts_hash64_fnv1a) { U64 seed; };
-inline
+internal inline
 void hash64__fnv1a(U64* hash, Slice_Byte data, Opts_hash64_fnv1a* opts) { 
 	local_persist U64 const default_seed = 0xcbf29ce484222325; 
 	assert(opts != nullptr); if (opts->seed == 0) opts->seed = default_seed;
@@ -451,13 +476,13 @@ typedef def_farray(Str8, 2);
 typedef def_Slice(A2_Str8);
 typedef def_KTL_Slot(Str8);
 typedef def_KTL(Str8);
-inline
+internal inline
 void ktl_populate_slice_a2_str8(KTL_Str8* kt, AllocatorInfo backing, Slice_A2_Str8 values) {
 	assert(kt != nullptr);
 	if (values.len == 0) return;
 	* kt = alloc_slice(backing, KTL_Slot_Str8, values.len);
 	for span_iter(SSIZE, id, 0, <, values.len) { 
-		memory_copy(& kt->ptr[id.cursor].value, & values.ptr[id.cursor][1], size_of(Str8));
+		mem_copy(& kt->ptr[id.cursor].value, & values.ptr[id.cursor][1], size_of(Str8));
 		hash64_fnv1a(& kt->ptr[id.cursor].key, slice_to_bytes(values.ptr[id.cursor][0]));
 	}
 }
@@ -515,11 +540,11 @@ typedef def_struct(KT1CX_Info) {
 	AllocatorInfo backing_table;
 	AllocatorInfo backing_cells;
 };
-void  kt1cx_init   (KT1CX_Info info, KT1CX_InfoMeta m, KT1CX_Byte* result);
-void  kt1cx_clear  (KT1CX_Byte kt,  KT1CX_ByteMeta meta);
-U64   kt1cx_slot_id(KT1CX_Byte kt,  U64 key, KT1CX_ByteMeta meta);
-Byte* kt1cx_get    (KT1CX_Byte kt,  U64 key, KT1CX_ByteMeta meta);
-Byte* kt1cx_set    (KT1CX_Byte kt,  U64 key, Slice_Byte value, AllocatorInfo backing_cells, KT1CX_ByteMeta meta);
+internal void  kt1cx_init   (KT1CX_Info info, KT1CX_InfoMeta m, KT1CX_Byte* result);
+internal void  kt1cx_clear  (KT1CX_Byte kt,  KT1CX_ByteMeta meta);
+internal U64   kt1cx_slot_id(KT1CX_Byte kt,  U64 key, KT1CX_ByteMeta meta);
+internal Byte* kt1cx_get    (KT1CX_Byte kt,  U64 key, KT1CX_ByteMeta meta);
+internal Byte* kt1cx_set    (KT1CX_Byte kt,  U64 key, Slice_Byte value, AllocatorInfo backing_cells, KT1CX_ByteMeta meta);
 
 #define kt1cx_assert(kt) do { \
 	slice_assert(kt.table);     \
@@ -528,20 +553,20 @@ Byte* kt1cx_set    (KT1CX_Byte kt,  U64 key, Slice_Byte value, AllocatorInfo bac
 #pragma endregion KT1CX
 
 #pragma region String Operations
-inline B32 char_is_upper(U8 c) { return('A' <= c && c <= 'Z'); }
-inline U8  char_to_lower(U8 c) { if (char_is_upper(c)) { c += ('a' - 'A'); } return(c); }
-inline U8 integer_symbols(U8 value) {
+internal inline B32 char_is_upper(U8 c) { return('A' <= c && c <= 'Z'); }
+internal inline U8  char_to_lower(U8 c) { if (char_is_upper(c)) { c += ('a' - 'A'); } return(c); }
+internal inline U8 integer_symbols(U8 value) {
 	local_persist U8 lookup_table[16] = { '0','1','2','3','4','5','6','7','8','9','A','B','C','D','E','F', }; return lookup_table[value]; 
 }
 
-char* str8_to_cstr_capped(Str8 content, Slice_Byte mem);
-Str8  str8_from_u32(AllocatorInfo ainfo, U32 num, U32 radix, U8 min_digits, U8 digit_group_separator);
+internal char* str8_to_cstr_capped(Str8 content, Slice_Byte mem);
+internal Str8  str8_from_u32(AllocatorInfo ainfo, U32 num, U32 radix, U8 min_digits, U8 digit_group_separator);
 
-Str8 str8__fmt_backed(AllocatorInfo tbl_backing, AllocatorInfo buf_backing, Str8 fmt_template, Slice_A2_Str8* entries);
+internal Str8 str8__fmt_backed(AllocatorInfo tbl_backing, AllocatorInfo buf_backing, Str8 fmt_template, Slice_A2_Str8* entries);
 #define str8_fmt_backed(tbl_backing, buf_backing, fmt_template, ...) \
 str8__fmt_backed(tbl_backing, buf_backing, lit(fmt_template), slice_arg_from_array(A2_Str8, __VA_ARGS__))
 
-Str8 str8__fmt(Str8 fmt_template, Slice_A2_Str8* entries);
+internal Str8 str8__fmt(Str8 fmt_template, Slice_A2_Str8* entries);
 #define str8_fmt(fmt_template, ...) str8__fmt(lit(fmt_template), slice_arg_from_array(A2_Str8, __VA_ARGS__))
 
 #define Str8Cache_CELL_DEPTH 4
@@ -564,17 +589,17 @@ typedef def_struct(Opts_str8cache_init) {
 	SSIZE cell_pool_size;
 	SSIZE table_size;
 };
-void      str8cache__init(Str8Cache* cache, Opts_str8cache_init* opts);
-Str8Cache str8cache__make(                  Opts_str8cache_init* opts);
+internal void      str8cache__init(Str8Cache* cache, Opts_str8cache_init* opts);
+internal Str8Cache str8cache__make(                  Opts_str8cache_init* opts);
 
 #define str8cache_init(cache, ...) str8cache__init(cache, opt_args(Opts_str8cache_init, __VA_ARGS__))
 #define str8cache_make(...)        str8cache__make(       opt_args(Opts_str8cache_init, __VA_ARGS__))
 
-void  str8cache_clear(KT1CX_Str8 kt);
-Str8* str8cache_get  (KT1CX_Str8 kt, U64 key);
-Str8* str8cache_set  (KT1CX_Str8 kt, U64 key, Str8 value, AllocatorInfo str_reserve, AllocatorInfo backing_cells);
+internal void  str8cache_clear(KT1CX_Str8 kt);
+internal Str8* str8cache_get  (KT1CX_Str8 kt, U64 key);
+internal Str8* str8cache_set  (KT1CX_Str8 kt, U64 key, Str8 value, AllocatorInfo str_reserve, AllocatorInfo backing_cells);
 
-Str8 cache_str8(Str8Cache* cache, Str8 str);
+internal Str8 cache_str8(Str8Cache* cache, Str8 str);
 
 typedef def_struct(Str8Gen) {
 	AllocatorInfo backing;
@@ -582,15 +607,15 @@ typedef def_struct(Str8Gen) {
 	SSIZE         len;
 	SSIZE         cap;
 };
-void    str8gen_init(Str8Gen* gen, AllocatorInfo backing);
-Str8Gen str8gen_make(              AllocatorInfo backing);
+internal void    str8gen_init(Str8Gen* gen, AllocatorInfo backing);
+internal Str8Gen str8gen_make(              AllocatorInfo backing);
 
 #define str8gen_slice_byte(gen) (Slice_Byte){ cast(Byte*, (gen).ptr), (gen).cap }
 
-inline Str8 str8_from_str8gen(Str8Gen gen) { return (Str8){gen.ptr, gen.len}; }
+internal inline Str8 str8_from_str8gen(Str8Gen gen) { return (Str8){gen.ptr, gen.len}; }
 
-void str8gen_append_str8(Str8Gen* gen, Str8 str);
-void str8gen__append_fmt(Str8Gen* gen, Str8 fmt_template, Slice_A2_Str8* tokens);
+internal void str8gen_append_str8(Str8Gen* gen, Str8 str);
+internal void str8gen__append_fmt(Str8Gen* gen, Str8 fmt_template, Slice_A2_Str8* tokens);
 
 #define str8gen_append_fmt(gen, fmt_template, ...) str8gen__append_fmt(gen, lit(fmt_template), slice_arg_from_array(A2_Str8, __VA_ARGS__))
 #pragma endregion String Operations
@@ -604,10 +629,10 @@ typedef def_struct(Opts_file_read_contents) {
 	B32           zero_backing;
 	byte_pad(4);
 };
-void api_file_read_contents(FileOpInfo* result, Str8 path, Opts_file_read_contents opts);
-void file_write_str8       (Str8 path, Str8 content);
+internal void api_file_read_contents(FileOpInfo* result, Str8 path, Opts_file_read_contents opts);
+internal void file_write_str8       (Str8 path, Str8 content);
 
-FileOpInfo file__read_contents(Str8 path, Opts_file_read_contents* opts);
+internal FileOpInfo file__read_contents(Str8 path, Opts_file_read_contents* opts);
 #define file_read_contents(path, ...) file__read_contents(path, opt_args(Opts_file_read_contents, __VA_ARGS__))
 #pragma endregion File System
 
@@ -648,8 +673,8 @@ typedef def_struct(Opts_watl_lex) {
 	B8 failon_slice_constraint_fail;
 	byte_pad(5);
 };
-void         api_watl_lex(WATL_LexInfo* info, Str8 source, Opts_watl_lex* opts);
-WATL_LexInfo watl__lex   (                    Str8 source, Opts_watl_lex* opts);
+internal void         api_watl_lex(WATL_LexInfo* info, Str8 source, Opts_watl_lex* opts);
+internal WATL_LexInfo watl__lex   (                    Str8 source, Opts_watl_lex* opts);
 #define watl_lex(source, ...) watl__lex(source, opt_args(Opts_watl_lex, __VA_ARGS__))
 
 typedef Str8 WATL_Node;
@@ -680,87 +705,47 @@ typedef def_struct(Opts_watl_parse) {
 	B32 failon_slice_constraint_fail;
 	byte_pad(4);
 };
-void           api_watl_parse(WATL_ParseInfo* info, Slice_WATL_Tok tokens, Opts_watl_parse* opts);
-WATL_ParseInfo watl__parse   (                      Slice_WATL_Tok tokens, Opts_watl_parse* opts);
+internal void           api_watl_parse(WATL_ParseInfo* info, Slice_WATL_Tok tokens, Opts_watl_parse* opts);
+internal WATL_ParseInfo watl__parse   (                      Slice_WATL_Tok tokens, Opts_watl_parse* opts);
 #define watl_parse(tokens, ...) watl__parse(tokens, opt_args(Opts_watl_parse, __VA_ARGS__))
 
-Str8 watl_dump_listing(AllocatorInfo buffer, Slice_WATL_Line lines);
+internal Str8 watl_dump_listing(AllocatorInfo buffer, Slice_WATL_Line lines);
 #pragma endregion WATL
 
 #pragma endregion Header
 
 #pragma region Implementation
 
-#pragma region Memory Operations
-// #include <memory.h>
-void* __cdecl memcpy (void* _Dst, void const* _Src, USIZE _Size);
-void* __cdecl memmove(void* _Dst, void const* _Src, USIZE _Size);
-void* __cdecl memset (void* _Dst, int         _Val, USIZE _Size);
-
-inline
-SSIZE align_pow2(SSIZE x, SSIZE b) {
-    assert(b != 0);
-    assert((b & (b - 1)) == 0);  // Check power of 2
-    return ((x + b - 1) & (~(b - 1)));
-}
-inline
-void* memory_copy(void* restrict dest, void const* restrict src, USIZE length) {
-	if (dest == nullptr || src == nullptr) { return nullptr; }
-	memcpy(dest, src, length);
-	return dest;
-}
-inline
-void* memory_copy_overlapping(void* restrict dest, void const* restrict src, USIZE length) {
-	if (dest == nullptr || src == nullptr) { return nullptr; }
-	memmove(dest, src, length);
-	return dest;
-}
-inline
-B32 memory_zero(void* dest, USIZE length) {
-	if (dest == nullptr) return false;
-	memset((unsigned char*)dest, 0, length);
-	return true;
-}
-inline void slice__zero(Slice_Byte mem, SSIZE typewidth) { slice_assert(mem); memory_zero(mem.ptr, mem.len); }
-inline
-void slice__copy(Slice_Byte dest, SSIZE dest_typewidth, Slice_Byte src, SSIZE src_typewidth) {
-	assert(dest.len >= src.len);
-	slice_assert(dest);
-	slice_assert(src);
-	memory_copy(dest.ptr, src.ptr, src.len);
-}
-#pragma endregion Memory Operations
-
 #pragma region Allocator Interface
-inline
+internal inline
 AllocatorQueryInfo allocator_query(AllocatorInfo ainfo) {
 	assert(ainfo.proc != nullptr);
 	AllocatorQueryInfo out; ainfo.proc((AllocatorProc_In){ .data = ainfo.data, .op = AllocatorOp_Query}, (AllocatorProc_Out*)& out); 
 	return out;
 }
-inline
+internal inline
 void mem_free(AllocatorInfo ainfo, Slice_Byte mem) {
 	assert(ainfo.proc != nullptr);
 	ainfo.proc((AllocatorProc_In){.data = ainfo.data, .op = AllocatorOp_Free, .old_allocation = mem}, &(AllocatorProc_Out){});
 }
-inline
+internal inline
 void mem_reset(AllocatorInfo ainfo) {
 	assert(ainfo.proc != nullptr);
 	ainfo.proc((AllocatorProc_In){.data = ainfo.data, .op = AllocatorOp_Reset}, &(AllocatorProc_Out){});
 }
-inline
+internal inline
 void mem_rewind(AllocatorInfo ainfo, AllocatorSP save_point) {
 	assert(ainfo.proc != nullptr);
 	ainfo.proc((AllocatorProc_In){.data = ainfo.data, .op = AllocatorOp_Rewind, .save_point = save_point}, &(AllocatorProc_Out){});
 }
-inline
+internal inline
 AllocatorSP mem_save_point(AllocatorInfo ainfo) {
 	assert(ainfo.proc != nullptr);
 	AllocatorProc_Out out;
 	ainfo.proc((AllocatorProc_In){.data = ainfo.data, .op = AllocatorOp_SavePoint}, & out);
 	return out.save_point;
 }
-inline
+internal inline
 Slice_Byte mem__alloc(AllocatorInfo ainfo, SSIZE size, Opts_mem_alloc* opts) {
 	assert(ainfo.proc != nullptr);
 	assert(opts != nullptr);
@@ -774,7 +759,7 @@ Slice_Byte mem__alloc(AllocatorInfo ainfo, SSIZE size, Opts_mem_alloc* opts) {
 	ainfo.proc(in, & out);
 	return out.allocation;
 }
-inline
+internal inline
 Slice_Byte mem__grow(AllocatorInfo ainfo, Slice_Byte mem, SSIZE size, Opts_mem_grow* opts) {
 	assert(ainfo.proc != nullptr);
 	assert(opts != nullptr);
@@ -789,7 +774,7 @@ Slice_Byte mem__grow(AllocatorInfo ainfo, Slice_Byte mem, SSIZE size, Opts_mem_g
 	ainfo.proc(in, & out);
 	return (Slice_Byte){out.allocation.ptr, opts->give_actual ? out.allocation.len : in.requested_size };
 }
-inline
+internal inline
 Slice_Byte mem__resize(AllocatorInfo ainfo, Slice_Byte mem, SSIZE size, Opts_mem_resize* opts) {
 	assert(ainfo.proc != nullptr);
 	assert(opts != nullptr);
@@ -804,7 +789,7 @@ Slice_Byte mem__resize(AllocatorInfo ainfo, Slice_Byte mem, SSIZE size, Opts_mem
 	ainfo.proc(in, & out);
 	return (Slice_Byte){out.allocation.ptr, opts->give_actual ? out.allocation.len : in.requested_size };
 }
-inline
+internal inline
 Slice_Byte mem__shrink(AllocatorInfo ainfo, Slice_Byte mem, SSIZE size, Opts_mem_shrink* opts) {
 	assert(ainfo.proc != nullptr);
 	assert(opts != nullptr);
@@ -822,15 +807,15 @@ Slice_Byte mem__shrink(AllocatorInfo ainfo, Slice_Byte mem, SSIZE size, Opts_mem
 #pragma endregion Allocator Interface
 
 #pragma region FArena (Fixed-Sized Arena)
-inline
+internal inline
 void farena_init(FArena* arena, Slice_Byte mem) {
 	assert(arena != nullptr);
 	arena->start    = mem.ptr;
 	arena->capacity = mem.len;
 	arena->used     = 0;
 }
-inline FArena farena_make(Slice_Byte mem) { FArena a; farena_init(& a, mem); return a; }
-inline
+internal inline FArena farena_make(Slice_Byte mem) { FArena a; farena_init(& a, mem); return a; }
+internal inline
 Slice_Byte farena__push(FArena* arena, SSIZE amount, SSIZE type_width, Opts_farena* opts) {
 	assert(opts != nullptr);
 	if (amount == 0) {
@@ -843,7 +828,7 @@ Slice_Byte farena__push(FArena* arena, SSIZE amount, SSIZE type_width, Opts_fare
 	arena->used    +=  to_commit;
 	return (Slice_Byte){ptr, desired};
 }
-inline
+internal inline
 Slice_Byte farena__grow(FArena* arena, SSIZE requested_size, Slice_Byte old_allocation, SSIZE alignment, B32 should_zero) {
 	// Check if the allocation is at the end of the arena
 	Byte* alloc_end = old_allocation.ptr + old_allocation.len;
@@ -861,10 +846,10 @@ Slice_Byte farena__grow(FArena* arena, SSIZE requested_size, Slice_Byte old_allo
 		return (Slice_Byte){0};
 	}
 	arena->used += aligned_grow;
-	memory_zero(old_allocation.ptr + old_allocation.len, grow_amount * cast(SSIZE, should_zero));
+	mem_zero(old_allocation.ptr + old_allocation.len, grow_amount * cast(SSIZE, should_zero));
 	return (Slice_Byte){old_allocation.ptr, requested_size};
 }
-inline
+internal inline
 Slice_Byte farena__shrink(FArena* arena, Slice_Byte old_allocation, SSIZE requested_size, SSIZE alignment) {
 	// Check if the allocation is at the end of the arena
 	Byte* alloc_end = old_allocation.ptr + old_allocation.len;
@@ -880,17 +865,18 @@ Slice_Byte farena__shrink(FArena* arena, Slice_Byte old_allocation, SSIZE reques
 	arena->used -= (aligned_original - aligned_new);
 	return (Slice_Byte){old_allocation.ptr, requested_size};
 }
-inline void farena_reset(FArena* arena) { arena->used = 0; }
-inline
+internal inline void farena_reset(FArena* arena) { arena->used = 0; }
+internal inline
 void farena_rewind(FArena* arena, AllocatorSP save_point) {
 	assert(save_point.type_sig == & farena_allocator_proc);
 	Byte* end    = cast(Byte*, cast(SSIZE, arena->start) + arena->used); assert_bounds(save_point.slot, arena->start, end);
 	arena->used -= save_point.slot - cast(SSIZE, arena->start);
 }
-inline
+internal inline
 AllocatorSP farena_save (FArena  arena) {
 	return (AllocatorSP){ .type_sig = & farena_allocator_proc, .slot = cast(SSIZE, arena.used) };
 }
+internal
 void farena_allocator_proc(AllocatorProc_In in, AllocatorProc_Out* out)
 {
 	assert(out != nullptr);
@@ -901,7 +887,7 @@ void farena_allocator_proc(AllocatorProc_In in, AllocatorProc_Out* out)
 		case AllocatorOp_Alloc:
 		case AllocatorOp_Alloc_NoZero:
 			out->allocation = farena__push(arena, in.requested_size, 1, &(Opts_farena){.type_name = lit("Byte"), .alignment = in.alignment});
-			memory_zero(out->allocation.ptr, out->allocation.len * cast(SSIZE, in.op));
+			mem_zero(out->allocation.ptr, out->allocation.len * cast(SSIZE, in.op));
 		break;
 
 		case AllocatorOp_Free:                       break;
@@ -992,11 +978,11 @@ typedef def_struct(OS_Windows_State) {
 };
 global OS_Windows_State os__windows_info;
 
-inline
+internal inline
 OS_SystemInfo* os_system_info(void) {
 	return & os__windows_info.system_info;
 }
-inline
+internal inline
 void os__enable_large_pages(void) {
 	MS_HANDLE token;
 	if (OpenProcessToken(GetCurrentProcess(), MS_TOKEN_ADJUST_PRIVILEGES | MS_TOKEN_QUERY, &token))
@@ -1013,14 +999,15 @@ void os__enable_large_pages(void) {
 		CloseHandle(token);
 	}
 }
-inline
+internal inline
 void os_init(void) {
 	os__enable_large_pages();
 	OS_SystemInfo* info = & os__windows_info.system_info;
 	info->target_page_size = (SSIZE)GetLargePageMinimum();
 }
 // TODO(Ed): Large pages disabled for now... (not failing gracefully)
-inline Byte* os__vmem_reserve(SSIZE size, Opts_vmem* opts) {
+internal inline
+Byte* os__vmem_reserve(SSIZE size, Opts_vmem* opts) {
 	assert(opts != nullptr);
 	void* result = VirtualAlloc(cast(void*, opts->base_addr), size
 		,	MS_MEM_RESERVE
@@ -1029,18 +1016,18 @@ inline Byte* os__vmem_reserve(SSIZE size, Opts_vmem* opts) {
 	);
 	return result;
 }
-inline B32 os__vmem_commit(void* vm, SSIZE size, Opts_vmem* opts) {
+internal inline B32 os__vmem_commit(void* vm, SSIZE size, Opts_vmem* opts) {
 	assert(opts != nullptr);
 	// if (opts->no_large_pages == false ) { return 1; }
 	B32 result = (VirtualAlloc(vm, size, MS_MEM_COMMIT, MS_PAGE_READWRITE) != 0);
 	return result;
 }
-inline void  os_vmem_release(void* vm, SSIZE size) { VirtualFree(vm, 0, MS_MEM_RESERVE); }
+internal inline void  os_vmem_release(void* vm, SSIZE size) { VirtualFree(vm, 0, MS_MEM_RESERVE); }
 #pragma endregion OS
 
 #pragma region VArena (Virutal Address Space Arena)
-finline SSIZE varena_header_size(void) { return align_pow2(size_of(VArena), MEMORY_ALIGNMENT_DEFAULT); }
-inline
+internal finline SSIZE varena_header_size(void) { return align_pow2(size_of(VArena), MEMORY_ALIGNMENT_DEFAULT); }
+internal inline
 VArena* varena__make(Opts_varena_make* opts) {
 	assert(opts != nullptr);
 	if (opts->reserve_size == 0) { opts->reserve_size = mega(64); }
@@ -1062,7 +1049,7 @@ VArena* varena__make(Opts_varena_make* opts) {
 	};
 	return vm;
 }
-inline
+internal inline
 Slice_Byte varena__push(VArena* vm, SSIZE amount, SSIZE type_width, Opts_varena* opts) {
 	assert(vm     != nullptr);
 	assert(amount != 0);
@@ -1085,21 +1072,21 @@ Slice_Byte varena__push(VArena* vm, SSIZE amount, SSIZE type_width, Opts_varena*
 			vm->committed += next_commit_size;
 		}
 	}
-	vm->commit_used = to_be_used;
-	SSIZE current_offset = vm->reserve_start + vm->commit_used;
+	SSIZE current_offset = vm->reserve_start + vm->commit_used; 
+	vm->commit_used      = to_be_used;
 	return (Slice_Byte){.ptr = cast(Byte*, current_offset), .len = requested_size};
 }
-inline
+internal inline
 Slice_Byte varena__grow(VArena* vm, SSIZE requested_size, Slice_Byte old_allocation, SSIZE alignment, B32 should_zero) {
 	assert(vm != nullptr);
 	SSIZE grow_amount = requested_size - old_allocation.len;
 	if (grow_amount == 0) { return old_allocation; }                             // Growing when not the last allocation not allowed
 	SSIZE current_offset = vm->reserve_start + vm->commit_used;                  assert(old_allocation.ptr == cast(Byte*, current_offset));
 	Slice_Byte allocation = varena_push_array(vm, Byte, grow_amount, alignment); assert(allocation.ptr != nullptr);
-	memory_zero(allocation.ptr, allocation.len * should_zero);
+	mem_zero(allocation.ptr, allocation.len * should_zero);
 	return (Slice_Byte){ old_allocation.ptr, old_allocation.len + allocation.len };
 }
-inline Slice_Byte varena__shrink(VArena* vm, Slice_Byte old_allocation, SSIZE requested_size) {
+internal inline Slice_Byte varena__shrink(VArena* vm, Slice_Byte old_allocation, SSIZE requested_size) {
 	SSIZE current_offset = vm->reserve_start + vm->commit_used;
 	SSIZE shrink_amount  = old_allocation.len - requested_size;
 	if (shrink_amount < 0) { return old_allocation; }
@@ -1107,14 +1094,15 @@ inline Slice_Byte varena__shrink(VArena* vm, Slice_Byte old_allocation, SSIZE re
 	vm->commit_used -= shrink_amount;
 	return (Slice_Byte){ old_allocation.ptr, requested_size };
 }
-inline void varena_release(VArena* arena) { os_vmem_release(arena, arena->reserve); }
-inline
+internal inline void varena_release(VArena* arena) { os_vmem_release(arena, arena->reserve); }
+internal inline
 void varena_rewind(VArena* vm, AllocatorSP sp) {
 	assert(vm != nullptr);
 	assert(sp.type_sig == & varena_allocator_proc);
 	vm->commit_used = max(sp.slot, sizeof(VArena));
 }
-inline AllocatorSP varena_save(VArena* vm) { return (AllocatorSP){varena_allocator_proc, vm->commit_used}; }
+internal inline AllocatorSP varena_save(VArena* vm) { return (AllocatorSP){varena_allocator_proc, vm->commit_used}; }
+internal
 void varena_allocator_proc(AllocatorProc_In in, AllocatorProc_Out* out)
 {
 	VArena* vm = cast(VArena*, in.data);
@@ -1123,7 +1111,7 @@ void varena_allocator_proc(AllocatorProc_In in, AllocatorProc_Out* out)
 		case AllocatorOp_Alloc:
 		case AllocatorOp_Alloc_NoZero:
 			out->allocation = varena_push_array(vm, Byte, in.requested_size, .alignment = in.alignment);
-			memory_zero(out->allocation.ptr, out->allocation.len * cast(SSIZE, in.op));
+			mem_zero(out->allocation.ptr, out->allocation.len * cast(SSIZE, in.op));
 		break;
 
 		case AllocatorOp_Free:                       break;
@@ -1157,7 +1145,7 @@ void varena_allocator_proc(AllocatorProc_In in, AllocatorProc_Out* out)
 #pragma endregion VArena
 
 #pragma region Arena (Chained Arena)
-inline
+internal inline
 Arena* arena__make(Opts_arena_make* opts) {
 	assert(opts != nullptr);
 	SSIZE header_size = align_pow2(size_of(Arena), MEMORY_ALIGNMENT_DEFAULT);
@@ -1172,6 +1160,7 @@ Arena* arena__make(Opts_arena_make* opts) {
 	};
 	return arena;
 }
+internal inline
 Slice_Byte arena__push(Arena* arena, SSIZE amount, SSIZE type_width, Opts_arena* opts) {
 	assert(arena != nullptr);
 	assert(opts  != nullptr);
@@ -1203,6 +1192,45 @@ Slice_Byte arena__push(Arena* arena, SSIZE amount, SSIZE type_width, Opts_arena*
 	active->pos = pos_pst;
 	return vresult;
 }
+internal inline
+Slice_Byte arena__grow(Arena* arena, Slice_Byte old_allocation, SSIZE requested_size, SSIZE alignment, B32 should_zero) {
+	Arena* active   = arena->current;
+	Byte* alloc_end = old_allocation.ptr + old_allocation.len;
+	Byte* arena_end = cast(Byte*, active) + active->pos;
+	if (alloc_end == arena_end)
+	{
+		SSIZE grow_amount  = requested_size - old_allocation.len;
+		SSIZE aligned_grow = align_pow2(grow_amount, alignment ? alignment : MEMORY_ALIGNMENT_DEFAULT);
+		if (active->pos + aligned_grow <= active->backing->reserve)
+		{
+			Slice_Byte vresult = varena_push_array(active->backing, Byte, aligned_grow, .alignment = alignment);
+			if (vresult.ptr != nullptr) {
+				active->pos += aligned_grow;
+				mem_zero(old_allocation.ptr + old_allocation.len, grow_amount * (SSIZE)should_zero);
+				return (Slice_Byte){old_allocation.ptr, old_allocation.len + vresult.len};
+			}
+		}
+	}
+	Slice_Byte new_alloc = arena__push(arena, requested_size, 1, &(Opts_arena){.alignment = alignment});
+	if (new_alloc.ptr == nullptr) { return (Slice_Byte){0}; }
+	mem_copy(new_alloc.ptr, old_allocation.ptr, old_allocation.len);
+	mem_zero(new_alloc.ptr + old_allocation.len, (requested_size - old_allocation.len) * (SSIZE)should_zero);
+	return new_alloc;
+}
+internal inline
+Slice_Byte arena__shrink(Arena* arena, Slice_Byte old_allocation, SSIZE requested_size, SSIZE alignment) {
+	Arena* active = arena->current;
+	Byte* alloc_end = old_allocation.ptr + old_allocation.len;
+	Byte* arena_end = cast(Byte*, active) + active->pos;
+	if (alloc_end != arena_end) {
+		return (Slice_Byte){old_allocation.ptr, requested_size};
+	}
+	SSIZE aligned_original = align_pow2(old_allocation.len, MEMORY_ALIGNMENT_DEFAULT);
+	SSIZE aligned_new      = align_pow2(requested_size, alignment ? alignment : MEMORY_ALIGNMENT_DEFAULT);
+	SSIZE pos_reduction    = aligned_original - aligned_new;
+	active->pos           -= pos_reduction;
+	return varena__shrink(active->backing, old_allocation, requested_size);
+}
 inline
 void arena_release(Arena* arena) {
 	assert(arena != nullptr);
@@ -1213,7 +1241,8 @@ void arena_release(Arena* arena) {
 		varena_release(curr->backing);
 	}
 }
-inline void arena_reset(Arena* arena) { arena_rewind(arena, (AllocatorSP){.type_sig = arena_allocator_proc, .slot = 0}); }
+internal inline void arena_reset(Arena* arena) { arena_rewind(arena, (AllocatorSP){.type_sig = arena_allocator_proc, .slot = 0}); }
+internal inline
 void arena_rewind(Arena* arena, AllocatorSP save_point) {
 	assert(arena != nullptr);
 	assert(save_point.type_sig == arena_allocator_proc);
@@ -1230,7 +1259,8 @@ void arena_rewind(Arena* arena, AllocatorSP save_point) {
 	curr->pos = new_pos;
 	varena_rewind(curr->backing, (AllocatorSP){varena_allocator_proc, curr->pos + sizeof(VArena)});
 }
-inline AllocatorSP arena_save(Arena* arena) { return (AllocatorSP){arena_allocator_proc, arena->base_pos + arena->current->pos}; };
+internal inline AllocatorSP arena_save(Arena* arena) { return (AllocatorSP){arena_allocator_proc, arena->base_pos + arena->current->pos}; };
+internal
 void arena_allocator_proc(AllocatorProc_In in, AllocatorProc_Out* out)
 {
 	assert(out != nullptr);
@@ -1241,59 +1271,18 @@ void arena_allocator_proc(AllocatorProc_In in, AllocatorProc_Out* out)
 		case AllocatorOp_Alloc:
 		case AllocatorOp_Alloc_NoZero:
 			out->allocation       = arena_push_array(arena, Byte, in.requested_size, .alignment = in.alignment);
-			memory_zero(out->allocation.ptr, out->allocation.len * cast(SSIZE, in.op));
+			mem_zero(out->allocation.ptr, out->allocation.len * cast(SSIZE, in.op));
 		break;
 
 		case AllocatorOp_Free:                      break;
 		case AllocatorOp_Reset: arena_reset(arena); break;
 
 		case AllocatorOp_Grow:
-		case AllocatorOp_Grow_NoZero: {
-			Arena* active   = arena->current;
-			Byte* alloc_end = in.old_allocation.ptr + in.old_allocation.len;
-			Byte* arena_end = cast(Byte*, active) + active->pos;
-			if (alloc_end == arena_end)
-			{
-				SSIZE grow_amount  = in.requested_size - in.old_allocation.len;
-				SSIZE aligned_grow = align_pow2(grow_amount, in.alignment ? in.alignment : MEMORY_ALIGNMENT_DEFAULT);
-				if (active->pos + aligned_grow <= active->backing->reserve)
-				{
-					Slice_Byte vresult = varena_push_array(active->backing, Byte, aligned_grow, .alignment = in.alignment);
-					if (vresult.ptr != nullptr)
-					{
-						active->pos          += aligned_grow;
-						out->allocation       = (Slice_Byte){in.old_allocation.ptr, in.requested_size};
-						memory_zero(in.old_allocation.ptr + in.old_allocation.len, grow_amount * (cast(SSIZE, in.op) - AllocatorOp_Grow_NoZero));
-						break;
-					}
-				}
-			}
-			Slice_Byte new_alloc = arena__push(arena, in.requested_size, 1, &(Opts_arena){.alignment = in.alignment});
-			if (new_alloc.ptr == nullptr) {
-				out->allocation = (Slice_Byte){0};
-				break;
-			}
-			memory_copy(new_alloc.ptr, in.old_allocation.ptr, in.old_allocation.len);
-			memory_zero(new_alloc.ptr + in.old_allocation.len, (in.requested_size - in.old_allocation.len) * (cast(SSIZE, in.op) - AllocatorOp_Grow_NoZero) );
-			out->allocation = new_alloc;
-		}
+		case AllocatorOp_Grow_NoZero:
+			out->allocation = arena__grow(arena, in.old_allocation, in.requested_size, in.alignment, (cast(SSIZE, in.op) - AllocatorOp_Grow_NoZero));
 		break;
-
-		case AllocatorOp_Shrink: {
-			Arena* active = arena->current;
-			Byte* alloc_end = in.old_allocation.ptr + in.old_allocation.len;
-			Byte* arena_end = cast(Byte*, active) + active->pos;
-			if (alloc_end != arena_end) {
-				out->allocation = (Slice_Byte){in.old_allocation.ptr, in.requested_size};
-				break;
-			}
-			//SSIZE shrink_amount    = in.old_allocation.len - in.requested_size;
-			SSIZE aligned_original = align_pow2(in.old_allocation.len, MEMORY_ALIGNMENT_DEFAULT);
-			SSIZE aligned_new      = align_pow2(in.requested_size, in.alignment ? in.alignment : MEMORY_ALIGNMENT_DEFAULT);
-			SSIZE pos_reduction    = aligned_original - aligned_new;
-			active->pos           -= pos_reduction;
-			out->allocation        = varena__shrink(active->backing, in.old_allocation, in.requested_size);
-		}
+		case AllocatorOp_Shrink:
+			out->allocation = arena__shrink(arena, in.old_allocation, in.requested_size, in.alignment);
 		break;
 
 		case AllocatorOp_Rewind:    arena_rewind(arena, in.save_point);  break;
@@ -1316,7 +1305,7 @@ void arena_allocator_proc(AllocatorProc_In in, AllocatorProc_Out* out)
 #pragma endregion Arena
 
 #pragma region Key Table 1-Layer Chained-Chunked_Cells (KT1CX)
-inline
+internal inline
 void kt1cx_init(KT1CX_Info info, KT1CX_InfoMeta m, KT1CX_Byte* result) {
 	assert(result                  != nullptr);
 	assert(info.backing_cells.proc != nullptr);
@@ -1328,6 +1317,7 @@ void kt1cx_init(KT1CX_Info info, KT1CX_InfoMeta m, KT1CX_Byte* result) {
 	result->table     = mem_alloc(info.backing_table, m.table_size * m.cell_size); slice_assert(result->table);
 	result->table.len = m.table_size; // Setting to the table number of elements instead of byte length.
 }
+internal inline
 void kt1cx_clear(KT1CX_Byte kt, KT1CX_ByteMeta m) {
 	Byte* cell_cursor = kt.table.ptr;
 	SSIZE table_len   = kt.table.len * m.cell_size;
@@ -1348,11 +1338,12 @@ void kt1cx_clear(KT1CX_Byte kt, KT1CX_ByteMeta m) {
 		}
 	}
 }
-inline
+internal inline
 U64 kt1cx_slot_id(KT1CX_Byte kt, U64 key, KT1CX_ByteMeta m) {
 	U64 hash_index = key % cast(U64, kt.table.len);
 	return hash_index;
 }
+internal inline
 Byte* kt1cx__get(KT1CX_Byte kt, U64 key, KT1CX_ByteMeta m) {
 	U64   hash_index  = kt1cx_slot_id(kt, key, m);
 	SSIZE cell_offset = hash_index * m.cell_size;
@@ -1379,7 +1370,7 @@ Byte* kt1cx__get(KT1CX_Byte kt, U64 key, KT1CX_ByteMeta m) {
 		}
 	}
 }
-inline
+internal
 Byte* kt1cx_set(KT1CX_Byte kt, U64 key, Slice_Byte value, AllocatorInfo backing_cells, KT1CX_ByteMeta m) {
 	U64   hash_index  = kt1cx_slot_id(kt, key, m);
 	SSIZE cell_offset = hash_index * m.cell_size;
@@ -1421,13 +1412,14 @@ Byte* kt1cx_set(KT1CX_Byte kt, U64 key, Slice_Byte value, AllocatorInfo backing_
 #pragma endregion Key Table
 
 #pragma region String Operations
-inline
+internal inline
 char* str8_to_cstr_capped(Str8 content, Slice_Byte mem) {
 	SSIZE copy_len = min(content.len, mem.len - 1);
-	memory_copy(mem.ptr, content.ptr, copy_len);
+	mem_copy(mem.ptr, content.ptr, copy_len);
 	mem.ptr[copy_len] = '\0';
 	return cast(char*, mem.ptr);
 }
+internal
 Str8 str8_from_u32(AllocatorInfo ainfo, U32 num, U32 radix, U8 min_digits, U8 digit_group_separator)
 {
 	Str8 result = {0};
@@ -1503,6 +1495,7 @@ Str8 str8_from_u32(AllocatorInfo ainfo, U32 num, U32 radix, U8 min_digits, U8 di
 	}
 	return result;
 }
+internal
 Str8 str8__fmt_ktl(AllocatorInfo ainfo, Slice_Byte* _buffer, KTL_Str8 table, Str8 fmt_template)
 {
 	assert(_buffer != nullptr);
@@ -1523,7 +1516,7 @@ Str8 str8__fmt_ktl(AllocatorInfo ainfo, Slice_Byte* _buffer, KTL_Str8 table, Str
 		while (cursor_fmt[copy_offset] != cast(UTF8, '<') && (cursor_fmt + copy_offset) < slice_end(fmt_template)) {
 			++ copy_offset;
 		}
-		memory_copy(cursor_buffer, cursor_fmt, copy_offset);
+		mem_copy(cursor_buffer, cursor_fmt, copy_offset);
 		buffer_remaining -= copy_offset;
 		left_fmt         -= copy_offset;
 		cursor_buffer    += copy_offset;
@@ -1560,7 +1553,7 @@ Str8 str8__fmt_ktl(AllocatorInfo ainfo, Slice_Byte* _buffer, KTL_Str8 table, Str
 					buffer_remaining += potential_token_len;
 				}
 				assert((buffer_remaining - potential_token_len) > 0);
-				memory_copy(cursor_buffer, value->ptr, value->len);
+				mem_copy(cursor_buffer, value->ptr, value->len);
 				// Sync cursor format to after the processed token
 				cursor_buffer    += value->len;
 				buffer_remaining -= value->len;
@@ -1581,7 +1574,7 @@ Str8 str8__fmt_ktl(AllocatorInfo ainfo, Slice_Byte* _buffer, KTL_Str8 table, Str
 	Str8   result = {buffer.ptr, buffer.len - buffer_remaining};
 	return result;
 }
-inline
+internal inline
 Str8 str8__fmt_backed(AllocatorInfo tbl_backing, AllocatorInfo buf_backing, Str8 fmt_template, Slice_A2_Str8* entries) {
 	KTL_Str8 kt; ktl_populate_slice_a2_str8(& kt, tbl_backing, *entries );
 	SSIZE      buf_size = kilo(64);
@@ -1589,6 +1582,7 @@ Str8 str8__fmt_backed(AllocatorInfo tbl_backing, AllocatorInfo buf_backing, Str8
 	Str8       result   = str8__fmt_ktl(buf_backing, & buffer, kt, fmt_template);
 	return     result;
 }
+internal inline
 Str8 str8__fmt(Str8 fmt_template, Slice_A2_Str8* entries) {
 	local_persist Byte tbl_mem[kilo(32)];  FArena tbl_arena = farena_make(slice_fmem(tbl_mem));
 	local_persist Byte buf_mem[kilo(64)];
@@ -1596,7 +1590,7 @@ Str8 str8__fmt(Str8 fmt_template, Slice_A2_Str8* entries) {
 	Str8   result = str8__fmt_ktl((AllocatorInfo){0}, & slice_fmem(buf_mem), kt, fmt_template);
 	return result;
 }
-inline
+internal inline
 void str8cache__init(Str8Cache* cache, Opts_str8cache_init* opts) {
 	assert(cache != nullptr);
 	assert(opts  != nullptr);
@@ -1626,8 +1620,8 @@ void str8cache__init(Str8Cache* cache, Opts_str8cache_init* opts) {
 	kt1cx_init(info, m, cast(KT1CX_Byte*, & cache->kt));
 	return;
 }
-inline Str8Cache str8cache__make(Opts_str8cache_init* opts) { Str8Cache cache; str8cache__init(& cache, opts); return cache; }
-inline
+internal inline Str8Cache str8cache__make(Opts_str8cache_init* opts) { Str8Cache cache; str8cache__init(& cache, opts); return cache; }
+internal inline
 void str8cache_clear(KT1CX_Str8 kt) {
 	kt1cx_assert(kt);
 	kt1cx_clear(kt1cx_byte(kt), (KT1CX_ByteMeta){
@@ -1640,7 +1634,7 @@ void str8cache_clear(KT1CX_Str8 kt) {
 		.type_name        = lit(stringify(Str8))
 	});
 }
-inline
+internal inline
 Str8* str8cache_get(KT1CX_Str8 kt, U64 key) {
 	kt1cx_assert(kt);
 	Byte* result = kt1cx__get(kt1cx_byte(kt), key
@@ -1655,7 +1649,7 @@ Str8* str8cache_get(KT1CX_Str8 kt, U64 key) {
 	});
 	return cast(Str8*, result);
 }
-inline
+internal inline
 Str8* str8cache_set(KT1CX_Str8 kt, U64 key, Str8 value, AllocatorInfo str_reserve, AllocatorInfo backing_cells) {
 	kt1cx_assert(kt);
 	slice_assert(value);
@@ -1679,14 +1673,14 @@ Str8* str8cache_set(KT1CX_Str8 kt, U64 key, Str8 value, AllocatorInfo str_reserv
 	}
 	return result;
 }
-inline
+internal inline
 Str8 cache_str8(Str8Cache* cache, Str8 str) {
 	assert(cache != nullptr);
 	U64    key    = 0; hash64_fnv1a(& key, slice_to_bytes(str));
 	Str8*  result = str8cache_set(cache->kt, key, str, cache->str_reserve, cache->cell_reserve);
 	return * result;
 }
-inline
+internal inline
 void str8gen_init(Str8Gen* gen, AllocatorInfo backing) {
 	assert(gen != nullptr);
 	gen->backing = backing;
@@ -1695,8 +1689,8 @@ void str8gen_init(Str8Gen* gen, AllocatorInfo backing) {
 	gen->len = 0;
 	gen->cap = kilo(4);
 }
-inline Str8Gen str8gen_make(AllocatorInfo backing) { Str8Gen gen; str8gen_init(& gen, backing); return gen; }
-inline
+internal inline Str8Gen str8gen_make(AllocatorInfo backing) { Str8Gen gen; str8gen_init(& gen, backing); return gen; }
+internal inline
 void str8gen_append_str8(Str8Gen* gen, Str8 str){
 	Slice_Byte result = mem_grow(gen->backing, str8gen_slice_byte(* gen), str.len + gen->len);
 	slice_assert(result);
@@ -1706,6 +1700,7 @@ void str8gen_append_str8(Str8Gen* gen, Str8 str){
 	gen->len += str.len;
 	gen->cap  = result.len;
 }
+internal inline
 void str8gen__append_fmt(Str8Gen* gen, Str8 fmt_template, Slice_A2_Str8* entries){
 	local_persist Byte tbl_mem[kilo(32)]; FArena tbl_arena = farena_make(slice_fmem(tbl_mem));
 	KTL_Str8   kt     = {0}; ktl_populate_slice_a2_str8(& kt, ainfo_farena(tbl_arena), *entries );
@@ -1755,12 +1750,13 @@ _declspec(dllimport) MS_BOOL __stdcall WriteFile(
 __declspec(dllimport) MS_BOOL __stdcall GetFileSizeEx(MS_HANDLE hFile, MS_LARGE_INTEGER* lpFileSize);
 __declspec(dllimport) MS_DWORD __stdcall GetLastError(void);
 
-inline
+internal inline
 FileOpInfo file__read_contents(Str8 path, Opts_file_read_contents* opts) {
 	assert(opts != nullptr);
 	FileOpInfo result = {0}; api_file_read_contents(& result, path, * opts);
 	return result;
 }
+internal
 void api_file_read_contents(FileOpInfo* result, Str8 path, Opts_file_read_contents opts)
 {
 	assert(result != nullptr);
@@ -1820,6 +1816,7 @@ void api_file_read_contents(FileOpInfo* result, Str8 path, Opts_file_read_conten
 	result->content.len = file_size.QuadPart;
 	return;
 }
+internal inline
 void file_write_str8(Str8 path, Str8 content)
 {
 	slice_assert(path);
@@ -1885,7 +1882,7 @@ int __cdecl __stdio_common_vfprintf_s(
 	va_list          _ArgList
 );
 void __cdecl __va_start(va_list* , ...);
-inline
+internal inline
 int printf_err(char const* fmt, ...) {
 	int result;
 	va_list args;
@@ -1894,6 +1891,7 @@ int printf_err(char const* fmt, ...) {
 	va_end(args);
 	return result;
 }
+internal inline
 void assert_handler( char const* condition, char const* file, char const* function, S32 line, char const* msg, ... ) {
 	printf_err( "%s - %s:(%d): Assert Failure: ", file, function, line );
 	if ( condition )
@@ -1910,6 +1908,7 @@ void assert_handler( char const* condition, char const* file, char const* functi
 #pragma endregion Debug
 
 #pragma region WATL
+internal
 void api_watl_lex(WATL_LexInfo* info, Str8 source, Opts_watl_lex* opts)
 {
 	if (source.len == 0) { return; }
@@ -1998,8 +1997,8 @@ slice_constraint_fail:
 	assert(opts->failon_slice_constraint_fail == false);
 	return;
 }
-inline WATL_LexInfo watl__lex(Str8 source, Opts_watl_lex* opts) { WATL_LexInfo info = {0}; api_watl_lex(& info, source, opts); return info; }
-
+internal inline WATL_LexInfo watl__lex(Str8 source, Opts_watl_lex* opts) { WATL_LexInfo info = {0}; api_watl_lex(& info, source, opts); return info; }
+internal
 void api_watl_parse(WATL_ParseInfo* info, Slice_WATL_Tok tokens, Opts_watl_parse* opts)
 {
 	if (tokens.len == 0) { return; }
@@ -2060,8 +2059,8 @@ void api_watl_parse(WATL_ParseInfo* info, Slice_WATL_Tok tokens, Opts_watl_parse
 	}
 	return;
 }
-inline WATL_ParseInfo watl__parse(Slice_WATL_Tok tokens, Opts_watl_parse* opts) { WATL_ParseInfo info = {0}; api_watl_parse(& info, tokens, opts); return info; }
-
+internal inline WATL_ParseInfo watl__parse(Slice_WATL_Tok tokens, Opts_watl_parse* opts) { WATL_ParseInfo info = {0}; api_watl_parse(& info, tokens, opts); return info; }
+internal
 Str8 watl_dump_listing(AllocatorInfo buffer, Slice_WATL_Line lines)
 {
 	local_persist Byte scratch[kilo(64)] = {0}; FArena sarena = farena_make(slice_fmem(scratch)); AllocatorInfo sinfo = ainfo_farena(sarena);
@@ -2105,6 +2104,7 @@ Str8 watl_dump_listing(AllocatorInfo buffer, Slice_WATL_Line lines)
 
 #pragma warning(push)
 #pragma warning(disable: 4101)
+internal
 int main(void)
 {
 	os_init();
