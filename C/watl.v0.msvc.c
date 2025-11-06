@@ -1201,8 +1201,7 @@ Slice_Byte arena__grow(Arena* arena, Slice_Byte old_allocation, SSIZE requested_
 	{
 		SSIZE grow_amount  = requested_size - old_allocation.len;
 		SSIZE aligned_grow = align_pow2(grow_amount, alignment ? alignment : MEMORY_ALIGNMENT_DEFAULT);
-		if (active->pos + aligned_grow <= active->backing->reserve)
-		{
+		if (active->pos + aligned_grow <= active->backing->reserve) {
 			Slice_Byte vresult = varena_push_array(active->backing, Byte, aligned_grow, .alignment = alignment);
 			if (vresult.ptr != nullptr) {
 				active->pos += aligned_grow;
@@ -1214,7 +1213,7 @@ Slice_Byte arena__grow(Arena* arena, Slice_Byte old_allocation, SSIZE requested_
 	Slice_Byte new_alloc = arena__push(arena, requested_size, 1, &(Opts_arena){.alignment = alignment});
 	if (new_alloc.ptr == nullptr) { return (Slice_Byte){0}; }
 	mem_copy(new_alloc.ptr, old_allocation.ptr, old_allocation.len);
-	mem_zero(new_alloc.ptr + old_allocation.len, (requested_size - old_allocation.len) * (SSIZE)should_zero);
+	mem_zero(new_alloc.ptr + old_allocation.len, (new_alloc.len - old_allocation.len) * (SSIZE)should_zero);
 	return new_alloc;
 }
 internal inline

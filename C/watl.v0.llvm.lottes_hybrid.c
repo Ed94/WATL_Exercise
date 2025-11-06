@@ -4,7 +4,7 @@ Version:   0 (From Scratch, 1-Stage Compilation, LLVM & WinAPI Only, Win CRT Mul
 Host:      Windows 11 (x86-64)
 Toolchain: LLVM (2025-08-30), C-Stanard: 11
 
-Based on: Neokineogfx - Fixing C, personalized to include typeinfo more readily.
+Based on: Neokineogfx - Fixing C, personalized to utilize typeinfo.
 https://youtu.be/RrL7121MOeA
 */
 
@@ -1264,19 +1264,17 @@ Slice_Mem arena__push(Arena_R arena, U8 amount, U8 type_width, Opts_arena* opts)
 internal inline
 Slice_Mem arena__grow(Arena_R arena, Slice_Mem old_allocation, U8 requested_size, U8 alignment, B4 should_zero) {
 	Arena_R active = arena->current;
-	U8 alloc_end = old_allocation.ptr + old_allocation.len;
+	U8 alloc_end = old_allocation.ptr + old_allocation.len + requested_size;
 	U8 arena_end = u8_(active) + active->pos;
-	if (alloc_end == arena_end)
+	if (alloc_end == arena_end) 
 	{
 		U8 grow_amount  = requested_size - old_allocation.len;
 		U8 aligned_grow = align_pow2(grow_amount, alignment ? alignment : MEMORY_ALIGNMENT_DEFAULT);
-		if (active->pos + aligned_grow <= active->backing->reserve)
-		{
+		if (active->pos + aligned_grow <= active->backing->reserve) {
 			Slice_Mem vresult = varena_push_mem(active->backing, aligned_grow, .alignment = alignment);
-			if (vresult.ptr != null)
-			{
+			if (vresult.ptr != null) {
 				active->pos          += aligned_grow;
-				mem_zero(old_allocation.ptr + old_allocation.len, grow_amount * (U8)should_zero);
+				mem_zero(old_allocation.ptr + old_allocation.len, aligned_grow * (U8)should_zero);
 				return (Slice_Mem){old_allocation.ptr, aligned_grow + old_allocation.len};
 			}
 		}
@@ -1286,7 +1284,7 @@ Slice_Mem arena__grow(Arena_R arena, Slice_Mem old_allocation, U8 requested_size
 	Slice_Mem new_alloc = arena__push(arena, requested_size, 1, &(Opts_arena){.alignment = alignment});
 	if (new_alloc.ptr == null) { return (Slice_Mem){0}; }
 	mem_copy(new_alloc.ptr, old_allocation.ptr, old_allocation.len);
-	mem_zero(new_alloc.ptr + old_allocation.len, (requested_size - old_allocation.len) * (U8)should_zero);
+	mem_zero(new_alloc.ptr + old_allocation.len, (new_alloc.len - old_allocation.len) * (U8)should_zero);
 	return new_alloc;
 #pragma diagnostic pop
 }
@@ -1295,15 +1293,12 @@ Slice_Mem arena__shrink(Arena_R arena, Slice_Mem old_allocation, U8 requested_si
 	Arena_R active = arena->current;
 	U8 alloc_end = old_allocation.ptr + old_allocation.len;
 	U8 arena_end = u8_(active) + active->pos;
-	if (alloc_end != arena_end) {
-		return (Slice_Mem){old_allocation.ptr, requested_size};
-	}
+	if (alloc_end != arena_end) { return (Slice_Mem){old_allocation.ptr, requested_size}; }
 	U8 aligned_original = align_pow2(old_allocation.len, MEMORY_ALIGNMENT_DEFAULT);
 	U8 aligned_new      = align_pow2(requested_size, alignment ? alignment : MEMORY_ALIGNMENT_DEFAULT);
 	U8 pos_reduction    = aligned_original - aligned_new;
 	active->pos        -= pos_reduction;
-	varena__shrink(active->backing, old_allocation, requested_size);
-	return (Slice_Mem){old_allocation.ptr, requested_size};
+	return varena__shrink(active->backing, old_allocation, requested_size);
 }
 finline
 void arena_release(Arena_R arena) {
@@ -1351,10 +1346,8 @@ void arena_allocator_proc(AllocatorProc_In in, AllocatorProc_Out*R_ out)
 	case AllocatorOp_Reset: arena_reset(arena); break;
 
 	case AllocatorOp_Grow:
-	case AllocatorOp_Grow_NoZero: {
-		Slice_Mem result = arena__grow(arena, in.old_allocation, in.requested_size, in.alignment, in.op - AllocatorOp_Grow_NoZero);
-		out->allocation = result;
-	}
+	case AllocatorOp_Grow_NoZero:
+		out->allocation = arena__grow(arena, in.old_allocation, in.requested_size, in.alignment, in.op - AllocatorOp_Grow_NoZero);
 	break;
 	case AllocatorOp_Shrink:
 		out->allocation = arena__shrink(arena, in.old_allocation, in.requested_size, in.alignment);
