@@ -185,7 +185,7 @@ typedef def_struct(Slice_Str8) { Str8* ptr; U8 len; };
 		debug_trap();          \
 	}                        \
 } while(0)
-void assert_handler(UTF8*R_ condition, UTF8*R_ file, UTF8*R_ function, S4 line, UTF8*R_ msg, ... );
+internal void assert_handler(UTF8*R_ condition, UTF8*R_ file, UTF8*R_ function, S4 line, UTF8*R_ msg, ... );
 #else
 #define debug_trap()
 #define assert_trap(cond)
@@ -404,14 +404,14 @@ typedef def_struct(FArena) {
 	U8 capacity;
 	U8 used;
 };
-finline FArena      farena_make  (Slice_Mem mem);
-finline void        farena_init  (FArena_R arena, Slice_Mem byte);
-        Slice_Mem   farena__push (FArena_R arena, U8 amount, U8 type_width, Opts_farena*R_ opts);
-finline void        farena_reset (FArena_R arena);
-finline void        farena_rewind(FArena_R arena, AllocatorSP save_point);
-finline AllocatorSP farena_save  (FArena  arena);
+finline  FArena      farena_make  (Slice_Mem mem);
+finline  void        farena_init  (FArena_R arena, Slice_Mem byte);
+internal Slice_Mem   farena__push (FArena_R arena, U8 amount, U8 type_width, Opts_farena*R_ opts);
+finline  void        farena_reset (FArena_R arena);
+finline  void        farena_rewind(FArena_R arena, AllocatorSP save_point);
+finline  AllocatorSP farena_save  (FArena  arena);
 
-void farena_allocator_proc(AllocatorProc_In in, AllocatorProc_Out_R out);
+internal void farena_allocator_proc(AllocatorProc_In in, AllocatorProc_Out_R out);
 #define ainfo_farena(arena) (AllocatorInfo){ .proc = farena_allocator_proc, .data = u8_(& arena) }
 
 #define farena_push_mem(arena, amount, ...) farena__push(arena, amount, 1, opt_args(Opts_farena, lit(stringify(B1)), __VA_ARGS__))
@@ -435,8 +435,8 @@ typedef def_struct(Opts_vmem) {
 	B4    no_large_pages;
 	A4_B1 _PAD_;
 };
-void os_init(void);
-finline OS_SystemInfo* os_system_info(void);
+internal void           os_init       (void);
+finline  OS_SystemInfo* os_system_info(void);
 
 finline B4   os__vmem_commit (U8 vm, U8 size, Opts_vmem*R_ opts);
 finline U8   os__vmem_reserve(       U8 size, Opts_vmem*R_ opts);
@@ -467,17 +467,17 @@ typedef def_struct(Opts_varena_make) {
 	VArenaFlags flags;
 	A4_B1 _PAD_;
 };
-VArena*   varena__make(Opts_varena_make*R_ opts);
-#define   varena_make(...) varena__make(opt_args(Opts_varena_make, __VA_ARGS__))
+internal VArena* varena__make(Opts_varena_make*R_ opts);
+#define varena_make(...) varena__make(opt_args(Opts_varena_make, __VA_ARGS__))
 
-        Slice_Mem   varena__push  (VArena_R arena, U8 amount, U8 type_width, Opts_varena*R_ opts);
-finline void        varena_release(VArena_R arena);
-finline void        varena_rewind (VArena_R arena, AllocatorSP save_point);
-        void        varena_reset  (VArena_R arena);
-        Slice_Mem   varena__shrink(VArena_R arena, Slice_Mem old_allocation, U8 requested_size);
-finline AllocatorSP varena_save   (VArena_R arena);
+internal Slice_Mem   varena__push  (VArena_R arena, U8 amount, U8 type_width, Opts_varena*R_ opts);
+finline  void        varena_release(VArena_R arena);
+finline  void        varena_rewind (VArena_R arena, AllocatorSP save_point);
+internal void        varena_reset  (VArena_R arena);
+internal Slice_Mem   varena__shrink(VArena_R arena, Slice_Mem old_allocation, U8 requested_size);
+finline  AllocatorSP varena_save   (VArena_R arena);
 
-void varena_allocator_proc(AllocatorProc_In in, AllocatorProc_Out_R out);
+internal void varena_allocator_proc(AllocatorProc_In in, AllocatorProc_Out_R out);
 #define ainfo_varena(varena) (AllocatorInfo) { .proc = & varena_allocator_proc, .data = u8_(varena) }
 
 #define varena_push_mem(arena, amount, ...) varena__push(arena, amount, 1, opt_args(Opts_varena, lit(stringify(B1)), __VA_ARGS__))
@@ -505,14 +505,14 @@ typedef def_struct(Arena) {
 	A4_B1 _PAD_;
 };
 typedef Opts_varena_make Opts_arena_make;
-        Arena*      arena__make  (Opts_arena_make*R_ opts);
-        Slice_Mem   arena__push  (Arena_R arena, U8 amount, U8 type_width, Opts_arena*R_ opts);
-finline void        arena_release(Arena_R arena);
-finline void        arena_reset  (Arena_R arena);
-        void        arena_rewind (Arena_R arena, AllocatorSP save_point);
-finline AllocatorSP arena_save   (Arena_R arena);
+internal Arena*      arena__make  (Opts_arena_make*R_ opts);
+internal Slice_Mem   arena__push  (Arena_R arena, U8 amount, U8 type_width, Opts_arena*R_ opts);
+finline  void        arena_release(Arena_R arena);
+finline  void        arena_reset  (Arena_R arena);
+internal void        arena_rewind (Arena_R arena, AllocatorSP save_point);
+finline  AllocatorSP arena_save   (Arena_R arena);
 
-void arena_allocator_proc(AllocatorProc_In in, AllocatorProc_Out_R out);
+internal void arena_allocator_proc(AllocatorProc_In in, AllocatorProc_Out_R out);
 #define ainfo_arena(arena) (AllocatorInfo){ .proc = & arena_allocator_proc, .data = u8_(arena) }
 
 #define arena_make(...) arena__make(opt_args(Opts_arena_make, __VA_ARGS__))
@@ -568,7 +568,7 @@ typedef def_farray(Str8, 2);
 typedef def_Slice(A2_Str8);
 typedef def_KTL_Slot(Str8);
 typedef def_KTL(Str8);
-void ktl_populate_slice_a2_str8(KTL_Str8*R_ kt, AllocatorInfo backing, Slice_A2_Str8 values);
+finline void ktl_populate_slice_a2_str8(KTL_Str8*R_ kt, AllocatorInfo backing, Slice_A2_Str8 values);
 #pragma endregion KTL
 
 #pragma region Key Table 1-Layer Chained-Chunked-Cells (KT1CX)
@@ -623,11 +623,11 @@ typedef def_struct(KT1CX_Info) {
 	AllocatorInfo backing_table;
 	AllocatorInfo backing_cells;
 };
-        void kt1cx_init   (KT1CX_Info info, KT1CX_InfoMeta m, KT1CX_Byte*R_ result);
-        void kt1cx_clear  (KT1CX_Byte kt,          KT1CX_ByteMeta meta);
-finline U8   kt1cx_slot_id(KT1CX_Byte kt,  U8 key, KT1CX_ByteMeta meta);
-        U8   kt1cx_get    (KT1CX_Byte kt,  U8 key, KT1CX_ByteMeta meta);
-        U8   kt1cx_set    (KT1CX_Byte kt,  U8 key, Slice_Mem value, AllocatorInfo backing_cells, KT1CX_ByteMeta meta);
+internal void kt1cx_init   (KT1CX_Info info, KT1CX_InfoMeta m, KT1CX_Byte*R_ result);
+internal void kt1cx_clear  (KT1CX_Byte kt,          KT1CX_ByteMeta meta);
+finline  U8   kt1cx_slot_id(KT1CX_Byte kt,  U8 key, KT1CX_ByteMeta meta);
+internal U8   kt1cx_get    (KT1CX_Byte kt,  U8 key, KT1CX_ByteMeta meta);
+internal U8   kt1cx_set    (KT1CX_Byte kt,  U8 key, Slice_Mem value, AllocatorInfo backing_cells, KT1CX_ByteMeta meta);
 
 #define kt1cx_assert(kt) do { \
 	slice_assert(kt.table);     \
@@ -642,14 +642,14 @@ finline U1 integer_symbols(U1 value) {
 	local_persist U1 lookup_table[16] = { '0','1','2','3','4','5','6','7','8','9','A','B','C','D','E','F', }; return lookup_table[cast(U1, value)]; 
 }
 
-finline char* str8_to_cstr_capped(Str8 content, Slice_Mem mem);
-Str8  str8_from_u32(AllocatorInfo ainfo, U4 num, U4 radix, U4 min_digits, U4 digit_group_separator);
+finline  char* str8_to_cstr_capped(Str8 content, Slice_Mem mem);
+internal Str8  str8_from_u32(AllocatorInfo ainfo, U4 num, U4 radix, U4 min_digits, U4 digit_group_separator);
 
 finline Str8 str8__fmt_backed(AllocatorInfo tbl_backing, AllocatorInfo buf_backing, Str8 fmt_template, Slice_A2_Str8*R_ entries);
 #define str8_fmt_backed(tbl_backing, buf_backing, fmt_template, ...) \
 str8__fmt_backed(tbl_backing, buf_backing, lit(fmt_template), slice_arg_from_array(A2_Str8, __VA_ARGS__))
 
-Str8 str8__fmt(Str8 fmt_template, Slice_A2_Str8*R_ entries);
+internal Str8 str8__fmt(Str8 fmt_template, Slice_A2_Str8*R_ entries);
 #define str8_fmt(fmt_template, ...) str8__fmt(lit(fmt_template), slice_arg_from_array(A2_Str8, __VA_ARGS__))
 
 #define Str8Cache_CELL_DEPTH 4
@@ -672,8 +672,8 @@ typedef def_struct(Opts_str8cache_init) {
 	U8 cell_pool_size;
 	U8 table_size;
 };
-        void      str8cache__init(Str8Cache_R cache, Opts_str8cache_init*R_ opts);
-finline Str8Cache str8cache__make(                   Opts_str8cache_init*R_ opts);
+internal void      str8cache__init(Str8Cache_R cache, Opts_str8cache_init*R_ opts);
+finline  Str8Cache str8cache__make(                   Opts_str8cache_init*R_ opts);
 
 #define str8cache_init(cache, ...) str8cache__init(cache, opt_args(Opts_str8cache_init, __VA_ARGS__))
 #define str8cache_make(...)        str8cache__make(       opt_args(Opts_str8cache_init, __VA_ARGS__))
@@ -697,8 +697,8 @@ finline Str8Gen str8gen_make(               AllocatorInfo backing);
 
 finline Str8 str8_from_str8gen(Str8Gen gen) { return (Str8){ cast(UTF8_R, gen.ptr), gen.len}; }
 
-finline void str8gen_append_str8(Str8Gen_R gen, Str8 str);
-        void str8gen__append_fmt(Str8Gen_R gen, Str8 fmt_template, Slice_A2_Str8*R_ tokens);
+finline  void str8gen_append_str8(Str8Gen_R gen, Str8 str);
+internal void str8gen__append_fmt(Str8Gen_R gen, Str8 fmt_template, Slice_A2_Str8*R_ tokens);
 
 #define str8gen_append_fmt(gen, fmt_template, ...) str8gen__append_fmt(gen, lit(fmt_template), slice_arg_from_array(A2_Str8, __VA_ARGS__))
 #pragma endregion String Operations
@@ -712,8 +712,8 @@ typedef def_struct(Opts_read_file_contents) {
 	B4            zero_backing;
 	A4_B1 _PAD_;
 };
-void api_file_read_contents(FileOpInfo_R result, Str8 path, Opts_read_file_contents opts);
-void file_write_str8       (Str8 path, Str8 content);
+internal void api_file_read_contents(FileOpInfo_R result, Str8 path, Opts_read_file_contents opts);
+internal void file_write_str8       (Str8 path, Str8 content);
 
 finline FileOpInfo file__read_contents(Str8 path, Opts_read_file_contents*R_ opts);
 #define file_read_contents(path, ...) file__read_contents(path, opt_args(Opts_read_file_contents, __VA_ARGS__))
@@ -756,8 +756,8 @@ typedef def_struct(Opts_watl_lex) {
 	B1 failon_slice_constraint_fail;
 	A4_B1 _PAD_;
 };
-void         api_watl_lex(WATL_LexInfo_R info, Str8 source, Opts_watl_lex*R_ opts);
-WATL_LexInfo watl__lex   (                     Str8 source, Opts_watl_lex*R_ opts);
+internal void         api_watl_lex(WATL_LexInfo_R info, Str8 source, Opts_watl_lex*R_ opts);
+finline  WATL_LexInfo watl__lex   (                     Str8 source, Opts_watl_lex*R_ opts);
 #define watl_lex(source, ...) watl__lex(source, opt_args(Opts_watl_lex, __VA_ARGS__))
 
 typedef Str8 WATL_Node; typedef def_ptr_set(WATL_Node);
@@ -788,11 +788,11 @@ typedef def_struct(Opts_watl_parse) {
 	B4 failon_slice_constraint_fail;
 	A4_B1 _PAD_;
 };
-void           api_watl_parse(WATL_ParseInfo_R info, Slice_WATL_Tok tokens, Opts_watl_parse*R_ opts);
-WATL_ParseInfo watl__parse   (                       Slice_WATL_Tok tokens, Opts_watl_parse*R_ opts);
+internal void           api_watl_parse(WATL_ParseInfo_R info, Slice_WATL_Tok tokens, Opts_watl_parse*R_ opts);
+finline  WATL_ParseInfo watl__parse   (                       Slice_WATL_Tok tokens, Opts_watl_parse*R_ opts);
 #define watl_parse(tokens, ...) watl__parse(tokens, opt_args(Opts_watl_parse, __VA_ARGS__))
 
-Str8 watl_dump_listing(AllocatorInfo buffer, Slice_WATL_Line lines);
+internal Str8 watl_dump_listing(AllocatorInfo buffer, Slice_WATL_Line lines);
 #pragma endregion WATL
 
 #pragma endregion Header
@@ -824,8 +824,7 @@ void mem_rewind(AllocatorInfo ainfo, AllocatorSP save_point) {
 finline
 AllocatorSP mem_save_point(AllocatorInfo ainfo) {
 	assert(ainfo.proc != nullptr);
-	AllocatorProc_Out out;
-	ainfo.proc((AllocatorProc_In){.data = ainfo.data, .op = AllocatorOp_SavePoint}, & out);
+	AllocatorProc_Out out; ainfo.proc((AllocatorProc_In){.data = ainfo.data, .op = AllocatorOp_SavePoint}, & out);
 	return out.save_point;
 }
 finline
@@ -838,8 +837,7 @@ Slice_Mem mem__alloc(AllocatorInfo ainfo, U8 size, Opts_mem_alloc*R_ opts) {
 		.requested_size = size,
 		.alignment      = opts->alignment,
 	};
-	AllocatorProc_Out out;
-	ainfo.proc(in, & out);
+	AllocatorProc_Out out; ainfo.proc(in, & out);
 	return out.allocation;
 }
 finline
@@ -853,8 +851,7 @@ Slice_Mem mem__grow(AllocatorInfo ainfo, Slice_Mem mem, U8 size, Opts_mem_grow*R
 		.alignment      = opts->alignment,
 		.old_allocation = mem
 	};
-	AllocatorProc_Out out;
-	ainfo.proc(in, & out);
+	AllocatorProc_Out out; ainfo.proc(in, & out);
 	return (Slice_Mem){ out.allocation.ptr, opts->give_actual ? out.allocation.len : in.requested_size };
 }
 finline
@@ -868,8 +865,7 @@ Slice_Mem mem__resize(AllocatorInfo ainfo, Slice_Mem mem, U8 size, Opts_mem_resi
 		.alignment      = opts->alignment,
 		.old_allocation = mem,
 	};
-	AllocatorProc_Out out;
-	ainfo.proc(in, & out);
+	AllocatorProc_Out out; ainfo.proc(in, & out);
 	return (Slice_Mem){ out.allocation.ptr, opts->give_actual ? out.allocation.len : in.requested_size };
 }
 finline
@@ -883,8 +879,7 @@ Slice_Mem mem__shrink(AllocatorInfo ainfo, Slice_Mem mem, U8 size, Opts_mem_shri
 		.alignment      = opts->alignment,
 		.old_allocation = mem
 	};
-	AllocatorProc_Out out;
-	ainfo.proc(in, & out);
+	AllocatorProc_Out out; ainfo.proc(in, & out);
 	return out.allocation;
 }
 #pragma endregion Allocator Interface
@@ -898,7 +893,7 @@ void farena_init(FArena_R arena, Slice_Mem mem) {
 	arena->used     = 0;
 }
 finline FArena farena_make(Slice_Mem mem) { FArena a; farena_init(& a, mem); return a; }
-inline
+internal inline
 Slice_Mem farena__push(FArena_R arena, U8 amount, U8 type_width, Opts_farena*R_ opts) {
 	assert(opts != nullptr);
 	if (amount == 0) { return (Slice_Mem){}; }
@@ -909,7 +904,7 @@ Slice_Mem farena__push(FArena_R arena, U8 amount, U8 type_width, Opts_farena*R_ 
 	arena->used += to_commit;
 	return (Slice_Mem){ptr, desired};
 }
-inline
+internal inline
 Slice_Mem farena__grow(FArena_R arena, Slice_Mem old_allocation, U8 requested_size, U8 alignment, B4 should_zero) {
 	// Check if the allocation is at the end of the arena
 	U8 alloc_end = old_allocation.ptr + old_allocation.len;
@@ -927,11 +922,10 @@ Slice_Mem farena__grow(FArena_R arena, Slice_Mem old_allocation, U8 requested_si
 		return (Slice_Mem){0};
 	}
 	arena->used += aligned_grow;
-	Slice_Mem result = (Slice_Mem){ old_allocation.ptr, aligned_grow + requested_size };
 	mem_zero(old_allocation.ptr + old_allocation.len, grow_amount * cast(U8, should_zero));
-	return result;
+	return (Slice_Mem){ old_allocation.ptr, aligned_grow + requested_size };
 }
-inline
+internal inline
 Slice_Mem farena__shrink(FArena_R arena, Slice_Mem old_allocation, U8 requested_size, U8 alignment)
 {
 	// Check if the allocation is at the end of the arena
@@ -957,6 +951,7 @@ finline
 AllocatorSP farena_save (FArena arena) {
 	return (AllocatorSP){ .type_sig = & farena_allocator_proc, .slot = arena.used };
 }
+internal
 void farena_allocator_proc(AllocatorProc_In in, AllocatorProc_Out*R_ out)
 {
 	assert(out     != nullptr);
@@ -964,38 +959,38 @@ void farena_allocator_proc(AllocatorProc_In in, AllocatorProc_Out*R_ out)
 	FArena_R arena = cast(FArena_R, in.data);
 	switch (in.op)
 	{
-		case AllocatorOp_Alloc:
-		case AllocatorOp_Alloc_NoZero:
-			out->allocation = farena_push_mem(arena, in.requested_size, .alignment = in.alignment);
-			mem_zero(out->allocation.ptr, out->allocation.len * in.op);
-		break;
+	case AllocatorOp_Alloc:
+	case AllocatorOp_Alloc_NoZero:
+		out->allocation = farena_push_mem(arena, in.requested_size, .alignment = in.alignment);
+		mem_zero(out->allocation.ptr, out->allocation.len * in.op);
+	break;
 
-		case AllocatorOp_Free:                       break;
-		case AllocatorOp_Reset: farena_reset(arena); break;
+	case AllocatorOp_Free:                       break;
+	case AllocatorOp_Reset: farena_reset(arena); break;
 
-		case AllocatorOp_Grow:
-		case AllocatorOp_Grow_NoZero: 
-			out->allocation = farena__grow(arena, in.old_allocation, in.requested_size, in.alignment, in.op - AllocatorOp_Grow_NoZero);
-		break;
-		case AllocatorOp_Shrink:
-			out->allocation = farena__shrink(arena, in.old_allocation, in.requested_size, in.alignment);
-		break;
+	case AllocatorOp_Grow:
+	case AllocatorOp_Grow_NoZero: 
+		out->allocation = farena__grow(arena, in.old_allocation, in.requested_size, in.alignment, in.op - AllocatorOp_Grow_NoZero);
+	break;
+	case AllocatorOp_Shrink:
+		out->allocation = farena__shrink(arena, in.old_allocation, in.requested_size, in.alignment);
+	break;
 
-		case AllocatorOp_Rewind:    farena_rewind(arena, in.save_point);     break;
-		case AllocatorOp_SavePoint: out->save_point = farena_save(arena[0]); break;
+	case AllocatorOp_Rewind:    farena_rewind(arena, in.save_point);     break;
+	case AllocatorOp_SavePoint: out->save_point = farena_save(arena[0]); break;
 
-		case AllocatorOp_Query:
-			out->features =
-			  AllocatorQuery_Alloc
-			| AllocatorQuery_Reset
-			| AllocatorQuery_Resize
-			| AllocatorQuery_Rewind
-			;
-			out->max_alloc  = arena->capacity - arena->used;
-			out->min_alloc  = 0;
-			out->left       = out->max_alloc;
-			out->save_point = farena_save(arena[0]);
-		break;
+	case AllocatorOp_Query:
+		out->features =
+			AllocatorQuery_Alloc
+		| AllocatorQuery_Reset
+		| AllocatorQuery_Resize
+		| AllocatorQuery_Rewind
+		;
+		out->max_alloc  = arena->capacity - arena->used;
+		out->min_alloc  = 0;
+		out->left       = out->max_alloc;
+		out->save_point = farena_save(arena[0]);
+	break;
 	}
 	return;
 }
@@ -1057,7 +1052,7 @@ typedef def_struct(OS_Windows_State) { OS_SystemInfo system_info; };
 global OS_Windows_State os__windows_info;
 
 finline OS_SystemInfo* os_system_info(void) { return & os__windows_info.system_info; }
-inline
+internal inline
 void os__enable_large_pages(void) {
 	MS_HANDLE token;
 	if (OpenProcessToken(GetCurrentProcess(), MS_TOKEN_ADJUST_PRIVILEGES | MS_TOKEN_QUERY, &token))
@@ -1074,7 +1069,7 @@ void os__enable_large_pages(void) {
 		CloseHandle(token);
 	}
 }
-inline
+internal inline
 void os_init(void) {
 	os__enable_large_pages();
 	OS_SystemInfo*R_ info = & os__windows_info.system_info;
@@ -1096,12 +1091,12 @@ finline B4 os__vmem_commit(U8 vm, U8 size, Opts_vmem*R_ opts) {
 	B4 result = (VirtualAlloc(cast(MS_LPVOID, vm), size, MS_MEM_COMMIT, MS_PAGE_READWRITE) != 0);
 	return result;
 }
-inline void  os_vmem_release(U8 vm, U8 size) { VirtualFree(cast(MS_LPVOID, vm), 0, MS_MEM_RESERVE); }
+internal inline void  os_vmem_release(U8 vm, U8 size) { VirtualFree(cast(MS_LPVOID, vm), 0, MS_MEM_RESERVE); }
 #pragma endregion OS
 
 #pragma region VArena (Virutal Address Space Arena)
 finline U8 varena_header_size(void) { return align_pow2(size_of(VArena), MEMORY_ALIGNMENT_DEFAULT); }
-inline
+internal inline
 VArena* varena__make(Opts_varena_make*R_ opts) {
 	assert(opts != nullptr);
 	if (opts->reserve_size == 0) { opts->reserve_size = mega(64); }
@@ -1123,7 +1118,7 @@ VArena* varena__make(Opts_varena_make*R_ opts) {
 	};
 	return vm;
 }
-inline
+internal inline
 Slice_Mem varena__push(VArena_R vm, U8 amount, U8 type_width, Opts_varena*R_ opts) {
 	assert(vm     != nullptr);
 	assert(amount != 0);
@@ -1146,11 +1141,11 @@ Slice_Mem varena__push(VArena_R vm, U8 amount, U8 type_width, Opts_varena*R_ opt
 			vm->committed += next_commit_size;
 		}
 	}
-	vm->commit_used = to_be_used;
 	U8 current_offset = vm->reserve_start + vm->commit_used;
+	vm->commit_used   = to_be_used;
 	return (Slice_Mem){.ptr = current_offset, .len = requested_size};
 }
-inline
+internal inline
 Slice_Mem varena__grow(VArena_R vm, Slice_Mem old_allocation, U8 requested_size, U8 alignment, B4 should_zero) {
 	U8 grow_amount = requested_size - old_allocation.len;
 	if (grow_amount == 0) { return old_allocation; }                    // Growing when not the last allocation not allowed
@@ -1160,7 +1155,7 @@ Slice_Mem varena__grow(VArena_R vm, Slice_Mem old_allocation, U8 requested_size,
 	return (Slice_Mem){ old_allocation.ptr, old_allocation.len + allocation.len }; 
 }
 finline void varena_release(VArena_R arena) { os_vmem_release(u8_(arena), arena->reserve); }
-inline
+internal inline
 Slice_Mem varena__shrink(VArena_R vm, Slice_Mem old_allocation, U8 requested_size) {
 	U8 shrink_amount = old_allocation.len - requested_size;
 	if (lt_s(shrink_amount, 0)) { return old_allocation; }
@@ -1175,6 +1170,7 @@ void varena_rewind(VArena_R vm, AllocatorSP sp) {
 	vm->commit_used = max(sp.slot, sizeof(VArena));
 }
 finline AllocatorSP varena_save(VArena_R vm) { return (AllocatorSP){varena_allocator_proc, vm->commit_used}; }
+internal
 void varena_allocator_proc(AllocatorProc_In in, AllocatorProc_Out* out)
 {
 	VArena_R vm = cast(VArena_R, in.data);
@@ -1218,7 +1214,7 @@ void varena_allocator_proc(AllocatorProc_In in, AllocatorProc_Out* out)
 
 #pragma region Arena (Chained Arena)
 finline U8 arena_header_size(void) { return align_pow2(size_of(Arena), MEMORY_ALIGNMENT_DEFAULT); }
-inline
+internal inline
 Arena* arena__make(Opts_arena_make*R_ opts) {
 	assert(opts != nullptr);
 	U8 header_size = arena_header_size();
@@ -1233,6 +1229,7 @@ Arena* arena__make(Opts_arena_make*R_ opts) {
 	};
 	return arena;
 }
+internal inline
 Slice_Mem arena__push(Arena_R arena, U8 amount, U8 type_width, Opts_arena* opts) {
 	assert(arena != nullptr);
 	assert(opts  != nullptr);
@@ -1264,6 +1261,50 @@ Slice_Mem arena__push(Arena_R arena, U8 amount, U8 type_width, Opts_arena* opts)
 	active->pos = pos_pst;
 	return vresult;
 }
+internal inline
+Slice_Mem arena__grow(Arena_R arena, Slice_Mem old_allocation, U8 requested_size, U8 alignment, B4 should_zero) {
+	Arena_R active = arena->current;
+	U8 alloc_end = old_allocation.ptr + old_allocation.len;
+	U8 arena_end = u8_(active) + active->pos;
+	if (alloc_end == arena_end)
+	{
+		U8 grow_amount  = requested_size - old_allocation.len;
+		U8 aligned_grow = align_pow2(grow_amount, alignment ? alignment : MEMORY_ALIGNMENT_DEFAULT);
+		if (active->pos + aligned_grow <= active->backing->reserve)
+		{
+			Slice_Mem vresult = varena_push_mem(active->backing, aligned_grow, .alignment = alignment);
+			if (vresult.ptr != null)
+			{
+				active->pos          += aligned_grow;
+				mem_zero(old_allocation.ptr + old_allocation.len, grow_amount * (U8)should_zero);
+				return (Slice_Mem){old_allocation.ptr, aligned_grow + old_allocation.len};
+			}
+		}
+	}
+#pragma diagnostic push
+#pragma clang diagnostic ignored "-Wnrvo"
+	Slice_Mem new_alloc = arena__push(arena, requested_size, 1, &(Opts_arena){.alignment = alignment});
+	if (new_alloc.ptr == null) { return (Slice_Mem){0}; }
+	mem_copy(new_alloc.ptr, old_allocation.ptr, old_allocation.len);
+	mem_zero(new_alloc.ptr + old_allocation.len, (requested_size - old_allocation.len) * (U8)should_zero);
+	return new_alloc;
+#pragma diagnostic pop
+}
+internal inline
+Slice_Mem arena__shrink(Arena_R arena, Slice_Mem old_allocation, U8 requested_size, U8 alignment) {
+	Arena_R active = arena->current;
+	U8 alloc_end = old_allocation.ptr + old_allocation.len;
+	U8 arena_end = u8_(active) + active->pos;
+	if (alloc_end != arena_end) {
+		return (Slice_Mem){old_allocation.ptr, requested_size};
+	}
+	U8 aligned_original = align_pow2(old_allocation.len, MEMORY_ALIGNMENT_DEFAULT);
+	U8 aligned_new      = align_pow2(requested_size, alignment ? alignment : MEMORY_ALIGNMENT_DEFAULT);
+	U8 pos_reduction    = aligned_original - aligned_new;
+	active->pos        -= pos_reduction;
+	varena__shrink(active->backing, old_allocation, requested_size);
+	return (Slice_Mem){old_allocation.ptr, requested_size};
+}
 finline
 void arena_release(Arena_R arena) {
 	assert(arena != nullptr);
@@ -1275,6 +1316,7 @@ void arena_release(Arena_R arena) {
 	}
 }
 finline void arena_reset(Arena_R arena) { arena_rewind(arena, (AllocatorSP){.type_sig = arena_allocator_proc, .slot = 0}); }
+internal inline
 void arena_rewind(Arena_R arena, AllocatorSP save_point) {
 	assert(arena != nullptr);
 	assert(save_point.type_sig == arena_allocator_proc);
@@ -1291,6 +1333,7 @@ void arena_rewind(Arena_R arena, AllocatorSP save_point) {
 	varena_rewind(curr->backing, (AllocatorSP){varena_allocator_proc, curr->pos + size_of(VArena)});
 }
 finline AllocatorSP arena_save(Arena_R arena) { return (AllocatorSP){arena_allocator_proc, arena->base_pos + arena->current->pos}; }
+internal
 void arena_allocator_proc(AllocatorProc_In in, AllocatorProc_Out*R_ out)
 {
 	assert(out != nullptr);
@@ -1309,52 +1352,12 @@ void arena_allocator_proc(AllocatorProc_In in, AllocatorProc_Out*R_ out)
 
 	case AllocatorOp_Grow:
 	case AllocatorOp_Grow_NoZero: {
-		Arena_R active = arena->current;
-		U8 alloc_end = in.old_allocation.ptr + in.old_allocation.len;
-		U8 arena_end = u8_(active) + active->pos;
-		if (alloc_end == arena_end)
-		{
-			U8 grow_amount  = in.requested_size - in.old_allocation.len;
-			U8 aligned_grow = align_pow2(grow_amount, in.alignment ? in.alignment : MEMORY_ALIGNMENT_DEFAULT);
-			if (active->pos + aligned_grow <= active->backing->reserve)
-			{
-				Slice_Mem vresult = varena_push_mem(active->backing, aligned_grow, .alignment = in.alignment);
-				if (vresult.ptr != null)
-				{
-					active->pos          += aligned_grow;
-					out->allocation       = (Slice_Mem){in.old_allocation.ptr, in.requested_size};
-					mem_zero(in.old_allocation.ptr + in.old_allocation.len, grow_amount * in.op - AllocatorOp_Grow_NoZero);
-					break;
-				}
-			}
-		}
-		Slice_Mem new_alloc = arena__push(arena, in.requested_size, 1, &(Opts_arena){.alignment = in.alignment});
-		if (new_alloc.ptr == null) {
-			out->allocation = (Slice_Mem){0};
-			break;
-		}
-		mem_copy(new_alloc.ptr, in.old_allocation.ptr, in.old_allocation.len);
-		mem_zero(new_alloc.ptr + in.old_allocation.len, (in.requested_size - in.old_allocation.len) * in.op - AllocatorOp_Grow_NoZero);
-		out->allocation       = new_alloc;
+		Slice_Mem result = arena__grow(arena, in.old_allocation, in.requested_size, in.alignment, in.op - AllocatorOp_Grow_NoZero);
+		out->allocation = result;
 	}
 	break;
-
-	case AllocatorOp_Shrink: {
-		Arena_R active = arena->current;
-		U8 alloc_end = in.old_allocation.ptr + in.old_allocation.len;
-		U8 arena_end = u8_(active) + active->pos;
-		if (alloc_end != arena_end) {
-			out->allocation = (Slice_Mem){in.old_allocation.ptr, in.requested_size};
-			break;
-		}
-		//SSIZE shrink_amount    = in.old_allocation.len - in.requested_size;
-		U8 aligned_original = align_pow2(in.old_allocation.len, MEMORY_ALIGNMENT_DEFAULT);
-		U8 aligned_new      = align_pow2(in.requested_size, in.alignment ? in.alignment : MEMORY_ALIGNMENT_DEFAULT);
-		U8 pos_reduction    = aligned_original - aligned_new;
-		active->pos        -= pos_reduction;
-		varena__shrink(active->backing, in.old_allocation, in.requested_size);
-		out->allocation = (Slice_Mem){in.old_allocation.ptr, in.requested_size};
-	}
+	case AllocatorOp_Shrink:
+		out->allocation = arena__shrink(arena, in.old_allocation, in.requested_size, in.alignment);
 	break;
 
 	case AllocatorOp_Rewind:    arena_rewind(arena, in.save_point);  break;
@@ -1377,7 +1380,7 @@ void arena_allocator_proc(AllocatorProc_In in, AllocatorProc_Out*R_ out)
 #pragma endregion Arena
 
 #pragma region Key Table Linear (KTL)
-inline
+finline
 void ktl_populate_slice_a2_str8(KTL_Str8*R_ kt, AllocatorInfo backing, Slice_A2_Str8 values) {
 	assert(kt != nullptr);
 	if (values.len == 0) return;
@@ -1390,7 +1393,7 @@ void ktl_populate_slice_a2_str8(KTL_Str8*R_ kt, AllocatorInfo backing, Slice_A2_
 #pragma endregion KTL
 
 #pragma region Key Table 1-Layer Chained-Chunked_Cells (KT1CX)
-inline
+internal inline
 void kt1cx_init(KT1CX_Info info, KT1CX_InfoMeta m, KT1CX_Byte*R_ result) {
 	assert(result                  != nullptr);
 	assert(info.backing_cells.proc != nullptr);
@@ -1402,7 +1405,7 @@ void kt1cx_init(KT1CX_Info info, KT1CX_InfoMeta m, KT1CX_Byte*R_ result) {
 	result->table     = mem_alloc(info.backing_table, m.table_size * m.cell_size); slice_assert(result->table);
 	result->table.len = m.table_size; // Setting to the table number of elements instead of byte length.
 }
-inline
+internal inline
 void kt1cx_clear(KT1CX_Byte kt, KT1CX_ByteMeta m) {
 	U8 cell_cursor = kt.table.ptr;
 	U8 table_len   = kt.table.len * m.cell_size;
@@ -1425,9 +1428,9 @@ void kt1cx_clear(KT1CX_Byte kt, KT1CX_ByteMeta m) {
 }
 finline
 U8 kt1cx_slot_id(KT1CX_Byte kt, U8 key, KT1CX_ByteMeta m) {
-	U8 hash_index = key % kt.table.len;
-	return hash_index;
+	return key % kt.table.len;
 }
+inline
 U8 kt1cx_get(KT1CX_Byte kt, U8 key, KT1CX_ByteMeta m) {
 	U8 hash_index  = kt1cx_slot_id(kt, key, m);
 	U8 cell_offset = hash_index * m.cell_size;
@@ -1454,7 +1457,7 @@ U8 kt1cx_get(KT1CX_Byte kt, U8 key, KT1CX_ByteMeta m) {
 		}
 	}
 }
-inline
+internal
 U8 kt1cx_set(KT1CX_Byte kt, U8 key, Slice_Mem value, AllocatorInfo backing_cells, KT1CX_ByteMeta m) {
 	U8 hash_index  = kt1cx_slot_id(kt, key, m);
 	U8 cell_offset = hash_index * m.cell_size;
@@ -1504,24 +1507,25 @@ char* str8_to_cstr_capped(Str8 content, Slice_Mem mem) {
 	u1_r(mem.ptr)[copy_len] = '\0';
 	return cast(char*, mem.ptr);
 }
+internal
 Str8 str8_from_u32(AllocatorInfo ainfo, U4 num, U4 radix, U4 min_digits, U4 digit_group_separator)
 {
 	Str8 result = {0};
 	Str8 prefix = {0};
 	switch (radix) {
-		case 16: { prefix = lit("0x"); } break;
-		case 8:  { prefix = lit("0o"); } break;
-		case 2:  { prefix = lit("0b"); } break;
+	case 16: { prefix = lit("0x"); } break;
+	case 8:  { prefix = lit("0o"); } break;
+	case 2:  { prefix = lit("0b"); } break;
 	}
 	U4 digit_group_size = 3;
 	switch (radix) {
-		default: break;
-		case 2:
-		case 8:
-		case 16: {
-			digit_group_size = 4;
-		}
-		break;
+	default: break;
+	case 2:
+	case 8:
+	case 16: {
+		digit_group_size = 4;
+	}
+	break;
 	}
 	U4 needed_leading_zeros = 0;
 	{
@@ -1663,17 +1667,16 @@ finline
 Str8 str8__fmt_backed(AllocatorInfo tbl_backing, AllocatorInfo buf_backing, Str8 fmt_template, Slice_A2_Str8*R_ entries) {
 	KTL_Str8 kt; kt1l_populate_slice_a2_str8(& kt, tbl_backing, entries[0] );
 	U8 buf_size = kilo(64); Slice_Mem buffer = mem_alloc(buf_backing, buf_size);
-	Str8   result = str8__fmt_ktl(buf_backing, & buffer, kt, fmt_template);
-	return result;
+	return str8__fmt_ktl(buf_backing, & buffer, kt, fmt_template);
 }
+finline
 Str8 str8__fmt(Str8 fmt_template, Slice_A2_Str8*R_ entries) {
 	local_persist B1 tbl_mem[kilo(32)];  FArena tbl_arena = farena_make(slice_fmem(tbl_mem));
 	local_persist B1 buf_mem[kilo(64)];
 	KTL_Str8 kt = {0}; ktl_populate_slice_a2_str8(& kt, ainfo_farena(tbl_arena), entries[0] );
-	Str8   result = str8__fmt_ktl((AllocatorInfo){0}, & slice_fmem(buf_mem), kt, fmt_template);
-	return result;
+	return str8__fmt_ktl((AllocatorInfo){0}, & slice_fmem(buf_mem), kt, fmt_template);
 }
-inline
+internal inline
 void str8cache__init(Str8Cache_R cache, Opts_str8cache_init*R_ opts) {
 	assert(cache != nullptr);
 	assert(opts  != nullptr);
@@ -1761,8 +1764,7 @@ finline
 Str8 cache_str8(Str8Cache_R cache, Str8 str) {
 	assert(cache != nullptr);
 	U8     key    = 0; hash64_fnv1a(& key, slice_mem_s(str));
-	Str8_R result = str8cache_set(cache->kt, key, str, cache->str_reserve, cache->cell_reserve);
-	return result[0];
+	return str8cache_set(cache->kt, key, str, cache->str_reserve, cache->cell_reserve)[0];
 }
 finline
 void str8gen_init(Str8Gen_R gen, AllocatorInfo backing) {
@@ -1784,6 +1786,7 @@ void str8gen_append_str8(Str8Gen_R gen, Str8 str){
 	gen->len += str.len;
 	gen->cap  = result.len;
 }
+internal inline
 void str8gen__append_fmt(Str8Gen_R gen, Str8 fmt_template, Slice_A2_Str8*R_ entries){
 	local_persist B1 tbl_mem[kilo(32)]; FArena tbl_arena = farena_make(slice_fmem(tbl_mem));
 	KTL_Str8 kt     = {0}; ktl_populate_slice_a2_str8(& kt, ainfo_farena(tbl_arena), entries[0] );
@@ -1839,6 +1842,7 @@ FileOpInfo file__read_contents(Str8 path, Opts_read_file_contents*R_ opts) {
 	FileOpInfo result = {0}; api_file_read_contents(& result, path, opts[0]);
 	return result;
 }
+internal
 void api_file_read_contents(FileOpInfo_R result, Str8 path, Opts_read_file_contents opts)
 {
 	assert(result != nullptr);
@@ -1898,6 +1902,7 @@ void api_file_read_contents(FileOpInfo_R result, Str8 path, Opts_read_file_conte
 	result->content.len = u8_(file_size.QuadPart);
 	return;
 }
+internal
 void file_write_str8(Str8 path, Str8 content)
 {
 	slice_assert(path);
@@ -1972,6 +1977,7 @@ int printf_err(char const* fmt, ...) {
 	va_end(args);
 	return result;
 }
+internal inline
 void assert_handler( UTF8*R_ condition, UTF8*R_ file, UTF8*R_ function, S4 line, UTF8*R_ msg, ... ) {
 	printf_err( "%s - %s:(%d): Assert Failure: ", file, function, line );
 	if ( condition )
@@ -1988,6 +1994,7 @@ void assert_handler( UTF8*R_ condition, UTF8*R_ file, UTF8*R_ function, S4 line,
 #pragma endregion Debug
 
 #pragma region WATL
+internal
 void api_watl_lex(WATL_LexInfo_R info, Str8 source, Opts_watl_lex*R_ opts)
 {
 	if (source.len == 0) { return; }
@@ -2009,52 +2016,52 @@ void api_watl_lex(WATL_LexInfo_R info, Str8 source, Opts_watl_lex*R_ opts)
 	#define alloc_tok() alloc_type(opts->ainfo_toks, WATL_Tok, .alignment = alignof(WATL_Tok), .no_zero = true)
 		switch (code)
 		{
-			case WATL_Tok_Space:
-			case WATL_Tok_Tab:
-			{
-				if (prev[0] != cursor[0]) {
-					WATL_Tok_R new_tok = alloc_tok(); if (new_tok - 1 != tok && tok != nullptr) { goto slice_constraint_fail; }
-					tok            = new_tok;
-					tok[0]         = (WATL_Tok){ cursor, 0 };
-					was_formatting = true;
-					++ num;
-				}
-				cursor   += 1;
-				tok->len += 1;
-			}
-			break;
-			case WATL_Tok_LineFeed: {
+		case WATL_Tok_Space:
+		case WATL_Tok_Tab:
+		{
+			if (prev[0] != cursor[0]) {
 				WATL_Tok_R new_tok = alloc_tok(); if (new_tok - 1 != tok && tok != nullptr) { goto slice_constraint_fail; }
 				tok            = new_tok;
-				tok[0]         = (WATL_Tok){ cursor, 1 };
-				cursor        += 1;
+				tok[0]         = (WATL_Tok){ cursor, 0 };
 				was_formatting = true;
 				++ num;
 			}
-			break;
-			// Assuming what comes after is line feed.
-			case WATL_Tok_CarriageReturn: {
+			cursor   += 1;
+			tok->len += 1;
+		}
+		break;
+		case WATL_Tok_LineFeed: {
+			WATL_Tok_R new_tok = alloc_tok(); if (new_tok - 1 != tok && tok != nullptr) { goto slice_constraint_fail; }
+			tok            = new_tok;
+			tok[0]         = (WATL_Tok){ cursor, 1 };
+			cursor        += 1;
+			was_formatting = true;
+			++ num;
+		}
+		break;
+		// Assuming what comes after is line feed.
+		case WATL_Tok_CarriageReturn: {
+			WATL_Tok_R new_tok = alloc_tok(); if (new_tok - 1 != tok && tok != nullptr) { goto slice_constraint_fail; }
+			tok            = new_tok;
+			tok[0]         = (WATL_Tok){ cursor, 2 };
+			cursor        += 2;
+			was_formatting = true;
+			++ num;
+		}
+		break;
+		default:
+		{
+			if (was_formatting) {
 				WATL_Tok_R new_tok = alloc_tok(); if (new_tok - 1 != tok && tok != nullptr) { goto slice_constraint_fail; }
 				tok            = new_tok;
-				tok[0]         = (WATL_Tok){ cursor, 2 };
-				cursor        += 2;
-				was_formatting = true;
+				tok[0]         = (WATL_Tok){ cursor, 0 };
+				was_formatting = false;
 				++ num;
 			}
-			break;
-			default:
-			{
-				if (was_formatting) {
-					WATL_Tok_R new_tok = alloc_tok(); if (new_tok - 1 != tok && tok != nullptr) { goto slice_constraint_fail; }
-					tok            = new_tok;
-					tok[0]         = (WATL_Tok){ cursor, 0 };
-					was_formatting = false;
-					++ num;
-				}
-				cursor   += 1;
-				tok->len += 1;
-			}
-			break;
+			cursor   += 1;
+			tok->len += 1;
+		}
+		break;
 		}
 		prev = cursor - 1;
 		code = cursor[0];
@@ -2077,7 +2084,7 @@ slice_constraint_fail:
 	return;
 }
 inline WATL_LexInfo watl__lex(Str8 source, Opts_watl_lex*R_ opts) { WATL_LexInfo info = {0}; api_watl_lex(& info, source, opts); return info; }
-
+internal
 void api_watl_parse(WATL_ParseInfo_R info, Slice_WATL_Tok tokens, Opts_watl_parse*R_ opts)
 {
 	if (tokens.len == 0) { return; }
@@ -2097,49 +2104,49 @@ void api_watl_parse(WATL_ParseInfo_R info, Slice_WATL_Tok tokens, Opts_watl_pars
 	{
 		switch(token->ptr[0])
 		{
-			case WATL_Tok_CarriageReturn:
-			case WATL_Tok_LineFeed:
-			{
-				WATL_Line_R new_line = alloc_type(opts->ainfo_lines, WATL_Line); if (new_line - 1 != line) {
-					info->signal |= WATL_ParseStatus_MemFail_SliceConstraintFail;
-					WATL_ParseMsg_R msg = alloc_type(opts->ainfo_msgs, WATL_ParseMsg);
-					msg->content = lit("Line slice allocation was not contiguous");
-					msg->pos     = (WATL_Pos){cast(S4, info->lines.len), cast(S4, line->len)};
-					msg->line    = line;
-					msg->tok     = token;
-					sll_queue_push_n(info->msgs, msg_last, msg, next);
-					assert(opts->failon_slice_constraint_fail == false);
-					return;
-				}
-				line             = new_line;
-				line->ptr        = curr;
-				info->lines.len += 1;
+		case WATL_Tok_CarriageReturn:
+		case WATL_Tok_LineFeed:
+		{
+			WATL_Line_R new_line = alloc_type(opts->ainfo_lines, WATL_Line); if (new_line - 1 != line) {
+				info->signal |= WATL_ParseStatus_MemFail_SliceConstraintFail;
+				WATL_ParseMsg_R msg = alloc_type(opts->ainfo_msgs, WATL_ParseMsg);
+				msg->content = lit("Line slice allocation was not contiguous");
+				msg->pos     = (WATL_Pos){cast(S4, info->lines.len), cast(S4, line->len)};
+				msg->line    = line;
+				msg->tok     = token;
+				sll_queue_push_n(info->msgs, msg_last, msg, next);
+				assert(opts->failon_slice_constraint_fail == false);
+				return;
 			}
-			continue;
-
-			default:
-			break;
+			line             = new_line;
+			line->ptr        = curr;
+			info->lines.len += 1;
 		}
-		curr[0] = cache_str8(opts->str_cache, token[0]);
-		WATL_Node_R new_node = alloc_type(opts->ainfo_nodes, WATL_Node); if (new_node - 1 != curr) { 
-			info->signal |= WATL_ParseStatus_MemFail_SliceConstraintFail;
-			WATL_ParseMsg_R msg = alloc_type(opts->ainfo_msgs, WATL_ParseMsg);
-			msg->content = lit("Nodes slice allocation was not contiguous");
-			msg->pos     = (WATL_Pos){cast(S4, info->lines.len), cast(S4, line->len)};
-			msg->line    = line;
-			msg->tok     = token;
-			sll_queue_push_n(info->msgs, msg_last, msg, next);
-			assert(opts->failon_slice_constraint_fail == false);
-			return;
-		}
-		curr       = new_node;
-		line->len += 1;
 		continue;
+
+		default:
+		break;
+	}
+	curr[0] = cache_str8(opts->str_cache, token[0]);
+	WATL_Node_R new_node = alloc_type(opts->ainfo_nodes, WATL_Node); if (new_node - 1 != curr) { 
+		info->signal |= WATL_ParseStatus_MemFail_SliceConstraintFail;
+		WATL_ParseMsg_R msg = alloc_type(opts->ainfo_msgs, WATL_ParseMsg);
+		msg->content = lit("Nodes slice allocation was not contiguous");
+		msg->pos     = (WATL_Pos){cast(S4, info->lines.len), cast(S4, line->len)};
+		msg->line    = line;
+		msg->tok     = token;
+		sll_queue_push_n(info->msgs, msg_last, msg, next);
+		assert(opts->failon_slice_constraint_fail == false);
+		return;
+	}
+	curr       = new_node;
+	line->len += 1;
+	continue;
 	}
 	return;
 }
-inline WATL_ParseInfo watl__parse(Slice_WATL_Tok tokens, Opts_watl_parse*R_ opts) { WATL_ParseInfo info = {0}; api_watl_parse(& info, tokens, opts); return info; }
-
+finline WATL_ParseInfo watl__parse(Slice_WATL_Tok tokens, Opts_watl_parse*R_ opts) { WATL_ParseInfo info = {0}; api_watl_parse(& info, tokens, opts); return info; }
+internal
 Str8 watl_dump_listing(AllocatorInfo buffer, Slice_WATL_Line lines)
 {
 	local_persist B1 scratch[kilo(64)] = {0}; FArena sarena = farena_make(slice_fmem(scratch)); AllocatorInfo sinfo = ainfo_farena(sarena);
@@ -2159,11 +2166,10 @@ Str8 watl_dump_listing(AllocatorInfo buffer, Slice_WATL_Line lines)
 		for slice_iter(line[0], chunk)
 		{
 			Str8 id;
-			switch (chunk->ptr[0])
-			{
-				case WATL_Tok_Space: id = lit("Space");   break;
-				case WATL_Tok_Tab:   id = lit("Tab");     break;
-				default:             id = lit("Visible"); break;
+			switch (chunk->ptr[0]) {
+			case WATL_Tok_Space: id = lit("Space");   break;
+			case WATL_Tok_Tab:   id = lit("Tab");     break;
+			default:             id = lit("Visible"); break;
 			}
 			Str8 str_chunk_len = str8_from_u32(sinfo, cast(U4, chunk->len), 10, 0, 0);
 			str8gen_append_fmt(& result, "\t<id>(<size>): '<chunk>'\n"
@@ -2180,7 +2186,6 @@ Str8 watl_dump_listing(AllocatorInfo buffer, Slice_WATL_Line lines)
 #pragma endregion WATL
 
 #pragma endregion Implementation
-
 int main(void)
 {
 	os_init();

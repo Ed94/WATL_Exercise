@@ -118,8 +118,8 @@ $compiler_args += $flag_full_src_path
 # $compiler_args += $flag_optimize_speed_max
 # $compiler_args += $flag_optimize_fast
 # $compiler_args += $flag_optimize_size
-# $compiler_args += $flag_optimize_intrinsics
-$compiler_args += $flag_no_optimization
+$compiler_args += $flag_optimize_intrinsics
+# $compiler_args += $flag_no_optimization
 
 # Debug setup
 $compiler_args += ($flag_define + 'BUILD_DEBUG')

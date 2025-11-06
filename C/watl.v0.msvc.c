@@ -884,38 +884,38 @@ void farena_allocator_proc(AllocatorProc_In in, AllocatorProc_Out* out)
 	FArena* arena = cast(FArena*, in.data);
 	switch (in.op)
 	{
-		case AllocatorOp_Alloc:
-		case AllocatorOp_Alloc_NoZero:
-			out->allocation = farena__push(arena, in.requested_size, 1, &(Opts_farena){.type_name = lit("Byte"), .alignment = in.alignment});
-			mem_zero(out->allocation.ptr, out->allocation.len * cast(SSIZE, in.op));
-		break;
+	case AllocatorOp_Alloc:
+	case AllocatorOp_Alloc_NoZero:
+		out->allocation = farena__push(arena, in.requested_size, 1, &(Opts_farena){.type_name = lit("Byte"), .alignment = in.alignment});
+		mem_zero(out->allocation.ptr, out->allocation.len * cast(SSIZE, in.op));
+	break;
 
-		case AllocatorOp_Free:                       break;
-		case AllocatorOp_Reset: farena_reset(arena); break;
+	case AllocatorOp_Free:                       break;
+	case AllocatorOp_Reset: farena_reset(arena); break;
 
-		case AllocatorOp_Grow:
-		case AllocatorOp_Grow_NoZero: 
-			out->allocation = farena__grow(arena, in.requested_size, in.old_allocation, in.alignment, in.op - AllocatorOp_Grow_NoZero);
-		break;
-		case AllocatorOp_Shrink:
-			out->allocation = farena__shrink(arena, in.old_allocation, in.requested_size, in.alignment);
-		break;
+	case AllocatorOp_Grow:
+	case AllocatorOp_Grow_NoZero: 
+		out->allocation = farena__grow(arena, in.requested_size, in.old_allocation, in.alignment, in.op - AllocatorOp_Grow_NoZero);
+	break;
+	case AllocatorOp_Shrink:
+		out->allocation = farena__shrink(arena, in.old_allocation, in.requested_size, in.alignment);
+	break;
 
-		case AllocatorOp_Rewind:    farena_rewind(arena, in.save_point);    break;
-		case AllocatorOp_SavePoint: out->save_point = farena_save(* arena); break;
+	case AllocatorOp_Rewind:    farena_rewind(arena, in.save_point);    break;
+	case AllocatorOp_SavePoint: out->save_point = farena_save(* arena); break;
 
-		case AllocatorOp_Query:
-			out->features =
-			  AllocatorQuery_Alloc
-			| AllocatorQuery_Reset
-			| AllocatorQuery_Resize
-			| AllocatorQuery_Rewind
-			;
-			out->max_alloc  = arena->capacity - arena->used;
-			out->min_alloc  = 0;
-			out->left       = out->max_alloc;
-			out->save_point = farena_save(* arena);
-		break;
+	case AllocatorOp_Query:
+		out->features =
+			AllocatorQuery_Alloc
+		| AllocatorQuery_Reset
+		| AllocatorQuery_Resize
+		| AllocatorQuery_Rewind
+		;
+		out->max_alloc  = arena->capacity - arena->used;
+		out->min_alloc  = 0;
+		out->left       = out->max_alloc;
+		out->save_point = farena_save(* arena);
+	break;
 	}
 	return;
 }
@@ -1108,38 +1108,38 @@ void varena_allocator_proc(AllocatorProc_In in, AllocatorProc_Out* out)
 	VArena* vm = cast(VArena*, in.data);
 	switch (in.op)
 	{
-		case AllocatorOp_Alloc:
-		case AllocatorOp_Alloc_NoZero:
-			out->allocation = varena_push_array(vm, Byte, in.requested_size, .alignment = in.alignment);
-			mem_zero(out->allocation.ptr, out->allocation.len * cast(SSIZE, in.op));
-		break;
+	case AllocatorOp_Alloc:
+	case AllocatorOp_Alloc_NoZero:
+		out->allocation = varena_push_array(vm, Byte, in.requested_size, .alignment = in.alignment);
+		mem_zero(out->allocation.ptr, out->allocation.len * cast(SSIZE, in.op));
+	break;
 
-		case AllocatorOp_Free:                       break;
-		case AllocatorOp_Reset: vm->commit_used = 0; break;
+	case AllocatorOp_Free:                       break;
+	case AllocatorOp_Reset: vm->commit_used = 0; break;
 
-		case AllocatorOp_Grow_NoZero: 
-		case AllocatorOp_Grow: 
-			out->allocation = varena__grow(vm, in.requested_size, in.old_allocation, in.alignment, in.op - AllocatorOp_Grow_NoZero);
-		break;
-		case AllocatorOp_Shrink:
-			out->allocation = varena__shrink(vm, in.old_allocation, in.requested_size);
-		break;
+	case AllocatorOp_Grow_NoZero: 
+	case AllocatorOp_Grow: 
+		out->allocation = varena__grow(vm, in.requested_size, in.old_allocation, in.alignment, in.op - AllocatorOp_Grow_NoZero);
+	break;
+	case AllocatorOp_Shrink:
+		out->allocation = varena__shrink(vm, in.old_allocation, in.requested_size);
+	break;
 
-		case AllocatorOp_Rewind:    vm->commit_used = in.save_point.slot; break;
-		case AllocatorOp_SavePoint: out->save_point = varena_save(vm);    break;
+	case AllocatorOp_Rewind:    vm->commit_used = in.save_point.slot; break;
+	case AllocatorOp_SavePoint: out->save_point = varena_save(vm);    break;
 
-		case AllocatorOp_Query:
-			out->features =
-				AllocatorQuery_Alloc
-			|	AllocatorQuery_Resize
-			|	AllocatorQuery_Reset
-			|	AllocatorQuery_Rewind
-			;
-			out->max_alloc  = vm->reserve - vm->committed;
-			out->min_alloc  = kilo(4);
-			out->left       = out->max_alloc;
-			out->save_point = varena_save(vm);
-		break;
+	case AllocatorOp_Query:
+		out->features =
+			AllocatorQuery_Alloc
+		|	AllocatorQuery_Resize
+		|	AllocatorQuery_Reset
+		|	AllocatorQuery_Rewind
+		;
+		out->max_alloc  = vm->reserve - vm->committed;
+		out->min_alloc  = kilo(4);
+		out->left       = out->max_alloc;
+		out->save_point = varena_save(vm);
+	break;
 	}
 }
 #pragma endregion VArena
@@ -1268,38 +1268,38 @@ void arena_allocator_proc(AllocatorProc_In in, AllocatorProc_Out* out)
 	assert(arena != nullptr);
 	switch (in.op)
 	{
-		case AllocatorOp_Alloc:
-		case AllocatorOp_Alloc_NoZero:
-			out->allocation       = arena_push_array(arena, Byte, in.requested_size, .alignment = in.alignment);
-			mem_zero(out->allocation.ptr, out->allocation.len * cast(SSIZE, in.op));
-		break;
+	case AllocatorOp_Alloc:
+	case AllocatorOp_Alloc_NoZero:
+		out->allocation       = arena_push_array(arena, Byte, in.requested_size, .alignment = in.alignment);
+		mem_zero(out->allocation.ptr, out->allocation.len * cast(SSIZE, in.op));
+	break;
 
-		case AllocatorOp_Free:                      break;
-		case AllocatorOp_Reset: arena_reset(arena); break;
+	case AllocatorOp_Free:                      break;
+	case AllocatorOp_Reset: arena_reset(arena); break;
 
-		case AllocatorOp_Grow:
-		case AllocatorOp_Grow_NoZero:
-			out->allocation = arena__grow(arena, in.old_allocation, in.requested_size, in.alignment, (cast(SSIZE, in.op) - AllocatorOp_Grow_NoZero));
-		break;
-		case AllocatorOp_Shrink:
-			out->allocation = arena__shrink(arena, in.old_allocation, in.requested_size, in.alignment);
-		break;
+	case AllocatorOp_Grow:
+	case AllocatorOp_Grow_NoZero:
+		out->allocation = arena__grow(arena, in.old_allocation, in.requested_size, in.alignment, (cast(SSIZE, in.op) - AllocatorOp_Grow_NoZero));
+	break;
+	case AllocatorOp_Shrink:
+		out->allocation = arena__shrink(arena, in.old_allocation, in.requested_size, in.alignment);
+	break;
 
-		case AllocatorOp_Rewind:    arena_rewind(arena, in.save_point);  break;
-		case AllocatorOp_SavePoint: out->save_point = arena_save(arena); break;
+	case AllocatorOp_Rewind:    arena_rewind(arena, in.save_point);  break;
+	case AllocatorOp_SavePoint: out->save_point = arena_save(arena); break;
 
-		case AllocatorOp_Query:
-			out->features =
-				AllocatorQuery_Alloc
-			|	AllocatorQuery_Resize
-			|	AllocatorQuery_Reset
-			|	AllocatorQuery_Rewind
-			;
-			out->max_alloc  = arena->backing->reserve;
-			out->min_alloc  = kilo(4);
-			out->left       = out->max_alloc - arena->backing->commit_used;
-			out->save_point = arena_save(arena);
-		break;
+	case AllocatorOp_Query:
+		out->features =
+			AllocatorQuery_Alloc
+		|	AllocatorQuery_Resize
+		|	AllocatorQuery_Reset
+		|	AllocatorQuery_Rewind
+		;
+		out->max_alloc  = arena->backing->reserve;
+		out->min_alloc  = kilo(4);
+		out->left       = out->max_alloc - arena->backing->commit_used;
+		out->save_point = arena_save(arena);
+	break;
 	}
 }
 #pragma endregion Arena
@@ -1425,19 +1425,19 @@ Str8 str8_from_u32(AllocatorInfo ainfo, U32 num, U32 radix, U8 min_digits, U8 di
 	Str8 result = {0};
 	Str8 prefix = {0};
 	switch (radix) {
-		case 16: { prefix = lit("0x"); } break;
-		case 8:  { prefix = lit("0o"); } break;
-		case 2:  { prefix = lit("0b"); } break;
+	case 16: { prefix = lit("0x"); } break;
+	case 8:  { prefix = lit("0o"); } break;
+	case 2:  { prefix = lit("0b"); } break;
 	}
 	U8 digit_group_size = 3;
 	switch (radix) {
-		default: break;
-		case 2:
-		case 8:
-		case 16: {
-			digit_group_size = 4;
-		}
-		break;
+	default: break;
+	case 2:
+	case 8:
+	case 16: {
+		digit_group_size = 4;
+	}
+	break;
 	}
 	U32 needed_leading_zeros = 0;
 	{
@@ -1930,52 +1930,52 @@ void api_watl_lex(WATL_LexInfo* info, Str8 source, Opts_watl_lex* opts)
 	#define alloc_tok() alloc_type(opts->ainfo_toks, WATL_Tok, .alignment = alignof(WATL_Tok), .no_zero = true)
 		switch (code)
 		{
-			case WATL_Tok_Space:
-			case WATL_Tok_Tab:
-			{
-				if (* prev != * cursor) {
-					WATL_Tok* new_tok = alloc_tok(); if (new_tok - 1 != tok && tok != nullptr) { goto slice_constraint_fail; }
-					tok            = new_tok;
-					* tok          = (WATL_Tok){ cursor, 0 };
-					was_formatting = true;
-					++ num;
-				}
-				cursor   += 1;
-				tok->len += 1;
-			}
-			break;
-			case WATL_Tok_LineFeed: {
-					WATL_Tok* new_tok = alloc_tok(); if (new_tok - 1 != tok && tok != nullptr) { goto slice_constraint_fail; }
-					tok          = new_tok;
-				* tok          = (WATL_Tok){ cursor, 1 };
-				cursor        += 1;
+		case WATL_Tok_Space:
+		case WATL_Tok_Tab: 
+		{
+			if (* prev != * cursor) {
+				WATL_Tok* new_tok = alloc_tok(); if (new_tok - 1 != tok && tok != nullptr) { goto slice_constraint_fail; }
+				tok            = new_tok;
+				* tok          = (WATL_Tok){ cursor, 0 };
 				was_formatting = true;
 				++ num;
 			}
-			break;
-			// Assuming what comes after is line feed.
-			case WATL_Tok_CarriageReturn: {
-					WATL_Tok* new_tok = alloc_tok(); if (new_tok - 1 != tok && tok != nullptr) { goto slice_constraint_fail; }
-					tok          = new_tok;
-				* tok          = (WATL_Tok){ cursor, 2 };
-				cursor        += 2;
-				was_formatting = true;
+			cursor   += 1;
+			tok->len += 1;
+		}
+		break;
+		case WATL_Tok_LineFeed: {
+				WATL_Tok* new_tok = alloc_tok(); if (new_tok - 1 != tok && tok != nullptr) { goto slice_constraint_fail; }
+				tok          = new_tok;
+			* tok          = (WATL_Tok){ cursor, 1 };
+			cursor        += 1;
+			was_formatting = true;
+			++ num;
+		}
+		break;
+		// Assuming what comes after is line feed.
+		case WATL_Tok_CarriageReturn: {
+				WATL_Tok* new_tok = alloc_tok(); if (new_tok - 1 != tok && tok != nullptr) { goto slice_constraint_fail; }
+				tok          = new_tok;
+			* tok          = (WATL_Tok){ cursor, 2 };
+			cursor        += 2;
+			was_formatting = true;
+			++ num;
+		}
+		break;
+		default:
+		{
+			if (was_formatting) {
+				WATL_Tok* new_tok = alloc_tok(); if (new_tok - 1 != tok && tok != nullptr) { goto slice_constraint_fail; }
+				tok            = new_tok;
+				* tok          = (WATL_Tok){ cursor, 0 };
+				was_formatting = false;
 				++ num;
 			}
-			break;
-			default:
-			{
-				if (was_formatting) {
-					WATL_Tok* new_tok = alloc_tok(); if (new_tok - 1 != tok && tok != nullptr) { goto slice_constraint_fail; }
-					tok            = new_tok;
-					* tok          = (WATL_Tok){ cursor, 0 };
-					was_formatting = false;
-					++ num;
-				}
-				cursor   += 1;
-				tok->len += 1;
-			}
-			break;
+			cursor   += 1;
+			tok->len += 1;
+		}
+		break;
 		}
 		prev =  cursor - 1;
 		code = * cursor;
@@ -2018,28 +2018,28 @@ void api_watl_parse(WATL_ParseInfo* info, Slice_WATL_Tok tokens, Opts_watl_parse
 	{
 		switch(* token->ptr)
 		{
-			case WATL_Tok_CarriageReturn:
-			case WATL_Tok_LineFeed:
-			{
-				WATL_Line* new_line = alloc_type(opts->ainfo_lines, WATL_Line); if (new_line - 1 != line) {
-					info->signal |= WATL_ParseStatus_MemFail_SliceConstraintFail;
-					WATL_ParseMsg* msg = alloc_type(opts->ainfo_msgs, WATL_ParseMsg);
-					msg->content = lit("Line slice allocation was not contiguous");
-					msg->pos     = (WATL_Pos){cast(S32, info->lines.len), cast(S32, line->len)};
-					msg->line    = line;
-					msg->tok     = token;
-					sll_queue_push_n(info->msgs, msg_last, msg, next);
-					assert(opts->failon_slice_constraint_fail == false);
-					return;
-				}
-				line             = new_line;
-				line->ptr        = curr;
-				info->lines.len += 1;
+		case WATL_Tok_CarriageReturn:
+		case WATL_Tok_LineFeed:
+		{
+			WATL_Line* new_line = alloc_type(opts->ainfo_lines, WATL_Line); if (new_line - 1 != line) {
+				info->signal |= WATL_ParseStatus_MemFail_SliceConstraintFail;
+				WATL_ParseMsg* msg = alloc_type(opts->ainfo_msgs, WATL_ParseMsg);
+				msg->content = lit("Line slice allocation was not contiguous");
+				msg->pos     = (WATL_Pos){cast(S32, info->lines.len), cast(S32, line->len)};
+				msg->line    = line;
+				msg->tok     = token;
+				sll_queue_push_n(info->msgs, msg_last, msg, next);
+				assert(opts->failon_slice_constraint_fail == false);
+				return;
 			}
-			continue;
+			line             = new_line;
+			line->ptr        = curr;
+			info->lines.len += 1;
+		}
+		continue;
 
-			default:
-			break;
+		default:
+		break;
 		}
 		* curr = cache_str8(opts->str_cache, * token);
 		WATL_Node* new_node = alloc_type(opts->ainfo_nodes, WATL_Node); if (new_node - 1 != curr) { 
@@ -2080,11 +2080,10 @@ Str8 watl_dump_listing(AllocatorInfo buffer, Slice_WATL_Line lines)
 		for slice_iter(* line, chunk)
 		{
 			Str8 id;
-			switch (* chunk->ptr)
-			{
-				case WATL_Tok_Space: id = lit("Space");   break;
-				case WATL_Tok_Tab:   id = lit("Tab");     break;
-				default:             id = lit("Visible"); break;
+			switch (* chunk->ptr) {
+			case WATL_Tok_Space: id = lit("Space");   break;
+			case WATL_Tok_Tab:   id = lit("Tab");     break;
+			default:             id = lit("Visible"); break;
 			}
 			Str8 str_chunk_len = str8_from_u32(sinfo, cast(U32, chunk->len), 10, 0, 0);
 			str8gen_append_fmt(& result, "\t<id>(<size>): '<chunk>'\n"
@@ -2104,7 +2103,6 @@ Str8 watl_dump_listing(AllocatorInfo buffer, Slice_WATL_Line lines)
 
 #pragma warning(push)
 #pragma warning(disable: 4101)
-internal
 int main(void)
 {
 	os_init();
