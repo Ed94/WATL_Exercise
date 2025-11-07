@@ -2179,6 +2179,7 @@ Str8 watl_dump_listing(AllocatorInfo buffer, Slice_WATL_Line lines)
 #pragma endregion WATL
 
 #pragma endregion Implementation
+
 int main(void)
 {
 	os_init();

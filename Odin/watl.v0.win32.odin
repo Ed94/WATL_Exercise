@@ -100,23 +100,14 @@ align_pow2 :: #force_inline proc(x: int, b: int) -> int {
     assert((b & (b - 1)) == 0) // Check power of 2
     return ((x + b - 1) & ~(b - 1))
 }
-memory_zero :: #force_inline proc "contextless" (data: rawptr, len: int) -> rawptr {
-	intrinsics.mem_zero(data, len)
-	return data
-}
+memory_zero :: #force_inline proc "contextless" (data: rawptr, len: int) -> rawptr { intrinsics.mem_zero(data, len); return data }
 memory_zero_explicit :: #force_inline proc "contextless" (data: rawptr, len: int) -> rawptr {
 	intrinsics.mem_zero_volatile(data, len) // Use the volatile mem_zero
 	intrinsics.atomic_thread_fence(.Seq_Cst) // Prevent reordering
 	return data
 }
-memory_copy_overlapping :: #force_inline proc "contextless" (dst, src: rawptr, len: int) -> rawptr {
-	intrinsics.mem_copy(dst, src, len)
-	return dst
-}
-memory_copy :: #force_inline proc "contextless" (dst, src: rawptr, len: int) -> rawptr {
-	intrinsics.mem_copy_non_overlapping(dst, src, len)
-	return dst
-}
+memory_copy_overlapping :: #force_inline proc "contextless" (dst, src: rawptr, len: int) -> rawptr { intrinsics.mem_copy(dst, src, len);                 return dst }
+memory_copy             :: #force_inline proc "contextless" (dst, src: rawptr, len: int) -> rawptr { intrinsics.mem_copy_non_overlapping(dst, src, len); return dst }
 
 sll_stack_push_n :: proc "contextless" (curr, n, n_link: ^^$Type) {
     (n_link ^) = (curr ^)
@@ -136,21 +127,13 @@ sll_queue_push_nz :: proc "contextless" (first: ^$ParentType, last, n: ^^$Type, 
 }
 sll_queue_push_n :: #force_inline proc "contextless" (first: $ParentType, last, n: ^^$Type) { sll_queue_push_nz(first, last, n, nil) }
 
-SliceByte :: struct {
-	data: [^]byte,
-	len: int
-}
-SliceRaw  :: struct ($Type: typeid) {
-	data: [^]Type,
-	len:  int,
-}
+SliceByte :: struct                { data: [^]byte, len: int }
+SliceRaw  :: struct($Type: typeid) { data: [^]Type, len: int, }
 slice        :: #force_inline proc "contextless" (s: [^] $Type, num: $Some_Integer) -> [ ]Type { return transmute([]Type) SliceRaw(Type) { s, cast(int) num } }
 slice_cursor :: #force_inline proc "contextless" (s: []$Type)                       -> [^]Type { return transmute([^]Type) raw_data(s) }
-slice_assert :: #force_inline proc (s: $SliceType / []$Type) {
-	assert(len(s) > 0)
-	assert(s != nil)
-}
-slice_end :: #force_inline proc "contextless" (s : $SliceType / []$Type) -> ^Type { return & cursor(s)[len(s)] }
+slice_end    :: #force_inline proc "contextless" (s : $SliceType / []$Type)         -> ^Type   { return & cursor(s)[len(s)] }
+
+slice_assert :: #force_inline proc (s: $SliceType / []$Type) { assert(len(s) > 0); assert(s != nil) }
 
 @(require_results) slice_to_bytes :: proc "contextless" (s: []$Type) -> []byte         { return ([^]byte)(raw_data(s))[:len(s) * size_of(Type)] }
 @(require_results) slice_raw      :: proc "contextless" (s: []$Type) -> SliceRaw(Type) { return transmute(SliceRaw(Type)) s }
@@ -270,8 +253,7 @@ mem_alloc :: proc(ainfo: AllocatorInfo, size: int, alignment: int = MEMORY_ALIGN
 		requested_size = size,
 		alignment      = alignment,
 	}
-	output: AllocatorProc_Out
-	ainfo.procedure(input, & output)
+	output: AllocatorProc_Out; ainfo.procedure(input, & output)
 	return output.allocation
 }
 mem_grow :: proc(ainfo: AllocatorInfo, mem: []byte, size: int, alignment: int = MEMORY_ALIGNMENT_DEFAULT, no_zero: b32 = false, give_actual: b32 = false) -> []byte {
@@ -283,8 +265,7 @@ mem_grow :: proc(ainfo: AllocatorInfo, mem: []byte, size: int, alignment: int = 
 		alignment      = alignment,
 		old_allocation = mem,
 	}
-	output: AllocatorProc_Out
-	ainfo.procedure(input, & output)
+	output: AllocatorProc_Out; ainfo.procedure(input, & output)
 	return slice(cursor(output.allocation), give_actual ? len(output.allocation) : size)
 }
 mem_resize :: proc(ainfo: AllocatorInfo, mem: []byte, size: int, alignment: int = MEMORY_ALIGNMENT_DEFAULT, no_zero: b32 = false, give_actual: b32 = false) -> []byte {
@@ -296,8 +277,7 @@ mem_resize :: proc(ainfo: AllocatorInfo, mem: []byte, size: int, alignment: int 
 		alignment      = alignment,
 		old_allocation = mem,
 	}
-	output: AllocatorProc_Out
-	ainfo.procedure(input, & output)
+	output: AllocatorProc_Out; ainfo.procedure(input, & output)
 	return slice(cursor(output.allocation), give_actual ? len(output.allocation) : size)
 }
 mem_shrink :: proc(ainfo: AllocatorInfo, mem: []byte, size: int, alignment: int = MEMORY_ALIGNMENT_DEFAULT, no_zero: b32 = false) -> []byte {
@@ -309,8 +289,7 @@ mem_shrink :: proc(ainfo: AllocatorInfo, mem: []byte, size: int, alignment: int 
 		alignment      = alignment,
 		old_allocation = mem,
 	}
-	output: AllocatorProc_Out
-	ainfo.procedure(input, & output)
+	output: AllocatorProc_Out; ainfo.procedure(input, & output)
 	return output.allocation
 }
 
@@ -322,8 +301,7 @@ alloc_type  :: proc(ainfo: AllocatorInfo, $Type: typeid, alignment: int = MEMORY
 		requested_size = size_of(Type),
 		alignment      = alignment,
 	}
-	output: AllocatorProc_Out
-	ainfo.procedure(input, & output)
+	output: AllocatorProc_Out; ainfo.procedure(input, & output)
 	return transmute(^Type) raw_data(output.allocation)
 }
 alloc_slice :: proc(ainfo: AllocatorInfo, $SliceType: typeid / []$Type, num : int, alignment: int = MEMORY_ALIGNMENT_DEFAULT, no_zero: b32 = false) -> []Type {
@@ -334,17 +312,13 @@ alloc_slice :: proc(ainfo: AllocatorInfo, $SliceType: typeid / []$Type, num : in
 		requested_size = size_of(Type) * num,
 		alignment      = alignment,
 	}
-	output: AllocatorProc_Out
-	ainfo.procedure(input, & output)
+	output: AllocatorProc_Out; ainfo.procedure(input, & output)
 	return transmute([]Type) slice(raw_data(output.allocation), num)
 }
 //endregion Allocator Interface
 
 //region Strings
-Raw_String :: struct {
-	data: [^]byte,
-	len:     int,
-}
+Raw_String :: struct { data: [^]byte, len: int, }
 string_cursor :: proc(s: string) -> [^]u8 { return slice_cursor(transmute([]byte) s) }
 string_copy   :: proc(dst, src: string)   { slice_copy  (transmute([]byte) dst, transmute([]byte) src) }
 string_end    :: proc(s: string) -> ^u8   { return slice_end (transmute([]byte) s) }
@@ -356,10 +330,7 @@ FArena :: struct {
 	mem:  []byte,
 	used:   int,
 }
-farena_make :: proc(backing: []byte) -> FArena { 
-	arena := FArena {mem = backing}
-	return arena 
-}
+farena_make :: proc(backing: []byte) -> FArena { return {mem = backing}  }
 farena_init :: proc(arena: ^FArena, backing: []byte) {
 	assert(arena != nil)
 	arena.mem  = backing
@@ -367,20 +338,15 @@ farena_init :: proc(arena: ^FArena, backing: []byte) {
 }
 farena_push :: proc(arena: ^FArena, $Type: typeid, amount: int, alignment: int = MEMORY_ALIGNMENT_DEFAULT) -> []Type {
 	assert(arena != nil)
-	if amount == 0 {
-		return {}
-	}
+	if amount == 0 { return {} }
 	desired   := size_of(Type) * amount
 	to_commit := align_pow2(desired, alignment)
-	unused    := len(arena.mem) - arena.used
-	assert(to_commit <= unused)
+	unused    := len(arena.mem) - arena.used;    assert(to_commit <= unused)
 	ptr        := cursor(arena.mem[arena.used:])
 	arena.used += to_commit
 	return slice(ptr, amount)
 }
-farena_reset :: proc(arena: ^FArena) {
-	arena.used = 0
-}
+farena_reset  :: #force_inline proc(arena: ^FArena) { arena.used = 0 }
 farena_rewind :: proc(arena: ^FArena, save_point: AllocatorSP) {
 	assert(save_point.type_sig  == farena_allocator_proc)
 	assert(save_point.slot >= 0 && save_point.slot <= arena.used)
@@ -391,7 +357,6 @@ farena_allocator_proc :: proc(input: AllocatorProc_In, output: ^AllocatorProc_Ou
 	assert(output     != nil)
 	assert(input.data != nil)
 	arena := transmute(^FArena) input.data
-	
 	switch input.op 
 	{
 	case .Alloc, .Alloc_NoZero:
@@ -399,12 +364,9 @@ farena_allocator_proc :: proc(input: AllocatorProc_In, output: ^AllocatorProc_Ou
 		if input.op == .Alloc {
 			zero(output.allocation)
 		}
-		
-	case .Free:
-		// No-op for arena
-		
-	case .Reset:
-		farena_reset(arena)
+
+	case .Free:  // No-op for arena
+	case .Reset: farena_reset(arena)
 		
 	case .Grow, .Grow_NoZero:
 		// Check if the allocation is at the end of the arena
@@ -453,11 +415,8 @@ farena_allocator_proc :: proc(input: AllocatorProc_In, output: ^AllocatorProc_Ou
 		arena.used       -= (aligned_original - aligned_new)
 		output.allocation = input.old_allocation[:input.requested_size]
 		
-	case .Rewind:
-		farena_rewind(arena, input.save_point)
-		
-	case .SavePoint:
-		output.save_point = farena_save(arena^)
+	case .Rewind:    farena_rewind(arena, input.save_point)
+	case .SavePoint: output.save_point = farena_save(arena^)
 		
 	case .Query:
 		output.features   = {.Alloc, .Reset, .Grow, .Shrink, .Rewind}
@@ -471,14 +430,9 @@ farena_ainfo :: #force_inline proc "contextless" (arena : ^FArena) -> AllocatorI
 //endregion FArena
 
 //region OS
-OS_SystemInfo :: struct {
-	target_page_size: int,
-}
-OS_Windows_State :: struct {
-	system_info: OS_SystemInfo,
-}
-@(private)
-os_windows_info: OS_Windows_State
+OS_SystemInfo    :: struct { target_page_size: int }
+OS_Windows_State :: struct { system_info: OS_SystemInfo }
+@(private) os_windows_info: OS_Windows_State
 
 // Windows API constants
 MS_INVALID_HANDLE_VALUE    :: ~uintptr(0)
@@ -537,12 +491,7 @@ os_enable_large_pages :: proc() {
 		{
 			priv := MS_TOKEN_PRIVILEGES {
 				privilege_count = 1,
-				privileges = {
-					{
-						luid = luid,
-						attributes = MS_SE_PRIVILEGE_ENABLED,
-					},
-				},
+				privileges      = { { luid = luid, attributes = MS_SE_PRIVILEGE_ENABLED, }, },
 			}
 			AdjustTokenPrivileges(token, 0, &priv, size_of(MS_TOKEN_PRIVILEGES), nil, nil)
 		}
@@ -554,25 +503,19 @@ os_init :: proc() {
 	info                 := &os_windows_info.system_info
 	info.target_page_size = int(GetLargePageMinimum())
 }
-os_system_info :: proc() -> ^OS_SystemInfo {
-	return &os_windows_info.system_info
-}
-os_vmem_commit :: proc(vm: rawptr, size: int, no_large_pages: b32 = false) -> b32 {
+os_system_info :: #force_inline proc "contextless" () -> ^OS_SystemInfo { return & os_windows_info.system_info }
+os_vmem_commit :: #force_inline proc "contextless" (vm: rawptr, size: int, no_large_pages: b32 = false) -> b32 {
 	// Large pages disabled for now (not failing gracefully in original C)
-	result := VirtualAlloc(vm, uintptr(size), MS_MEM_COMMIT, MS_PAGE_READWRITE) != nil
-	return b32(result)
+	return cast(b32) VirtualAlloc(vm, uintptr(size), MS_MEM_COMMIT, MS_PAGE_READWRITE) != nil
 }
-os_vmem_reserve :: proc(size: int, base_addr: int = 0, no_large_pages: b32 = false) -> rawptr {
-	result := VirtualAlloc(rawptr(uintptr(base_addr)), uintptr(size),
+os_vmem_reserve :: #force_inline proc "contextless" (size: int, base_addr: int = 0, no_large_pages: b32 = false) -> rawptr {
+	return VirtualAlloc(rawptr(uintptr(base_addr)), uintptr(size),
 		MS_MEM_RESERVE,
 		// MS_MEM_COMMIT
 		// | (no_large_pages ? 0 : MS_MEM_LARGE_PAGES), // Large pages disabled
 		MS_PAGE_READWRITE)
-	return result
 }
-os_vmem_release :: proc(vm: rawptr, size: int) {
-	VirtualFree(vm, 0, MS_MEM_RELEASE)
-}
+os_vmem_release :: #force_inline proc "contextless" (vm: rawptr, size: int) { VirtualFree(vm, 0, MS_MEM_RELEASE) }
 //endregion OS
 
 //region VArena
@@ -646,17 +589,6 @@ varena_push :: proc(va: ^VArena, $Type: typeid, amount: int, alignment: int = ME
 	va.commit_used = to_be_used
 	return slice(transmute([^]Type) uintptr(current_offset), amount)
 }
-varena_release :: proc(va: ^VArena) {
-	os_vmem_release(va, va.reserve)
-}
-varena_rewind :: proc(va: ^VArena, save_point: AllocatorSP) {
-	assert(va != nil)
-	assert(save_point.type_sig == varena_allocator_proc)
-	va.commit_used = max(save_point.slot, size_of(VArena))
-}
-varena_reset :: proc(va: ^VArena) {
-	va.commit_used = size_of(VArena)
-}
 varena_shrink :: proc(va: ^VArena, old_allocation: []byte, requested_size: int, alignment: int = MEMORY_ALIGNMENT_DEFAULT) -> []byte {
 	assert(va != nil)
 	current_offset := va.reserve_start    + va.commit_used
@@ -667,6 +599,13 @@ varena_shrink :: proc(va: ^VArena, old_allocation: []byte, requested_size: int, 
 	assert(raw_data(old_allocation) == rawptr(uintptr(current_offset)))
 	va.commit_used -= shrink_amount
 	return old_allocation[:requested_size]
+}
+varena_release :: #force_inline proc(va: ^VArena) { os_vmem_release(va, va.reserve) }
+varena_reset   :: #force_inline proc(va: ^VArena) { va.commit_used = size_of(VArena) }
+varena_rewind  :: #force_inline proc(va: ^VArena, save_point: AllocatorSP) {
+	assert(va != nil)
+	assert(save_point.type_sig == varena_allocator_proc)
+	va.commit_used = max(save_point.slot, size_of(VArena))
 }
 varena_save :: #force_inline proc "contextless" (va: ^VArena) -> AllocatorSP { return AllocatorSP { type_sig = varena_allocator_proc, slot = va.commit_used } }
 varena_allocator_proc :: proc(input: AllocatorProc_In, output: ^AllocatorProc_Out) {
@@ -785,7 +724,7 @@ arena_push :: proc(arena: ^Arena, $Type: typeid, amount: int, alignment: int = M
 	active.pos = pos_pst
 	return slice(result_ptr, amount)
 }
-arena_release :: proc(arena: ^Arena) {
+arena_release :: #force_inline proc(arena: ^Arena) {
 	assert(arena != nil)
 	curr := arena.current
 	for curr != nil {
@@ -794,9 +733,7 @@ arena_release :: proc(arena: ^Arena) {
 		curr = prev
 	}
 }
-arena_reset :: proc(arena: ^Arena) {
-	arena_rewind(arena, AllocatorSP { type_sig = arena_allocator_proc, slot = 0 })
-}
+arena_reset  :: #force_inline proc(arena: ^Arena) { arena_rewind(arena, AllocatorSP { type_sig = arena_allocator_proc, slot = 0 }) }
 arena_rewind :: proc(arena: ^Arena, save_point: AllocatorSP) {
 	assert(arena != nil)
 	assert(save_point.type_sig == arena_allocator_proc)
@@ -1025,11 +962,7 @@ kt1cx_clear :: proc(kt: KT1CX_Byte, m: KT1CX_ByteMeta) {
 		}
 	}
 }
-kt1cx_slot_id :: proc(kt: KT1CX_Byte, key: u64, m: KT1CX_ByteMeta) -> u64 {
-	cell_size := m.cell_size // dummy value
-	hash_index := key % u64(len(kt.table))
-	return hash_index
-}
+kt1cx_slot_id :: #force_inline proc(kt: KT1CX_Byte, key: u64, m: KT1CX_ByteMeta) -> u64 { return key % u64(len(kt.table)) }
 kt1cx_get :: proc(kt: KT1CX_Byte, key: u64, m: KT1CX_ByteMeta) -> ^byte {
 	hash_index   := kt1cx_slot_id(kt, key, m)
 	cell_offset  := uintptr(hash_index) * uintptr(m.cell_size)
@@ -1100,28 +1033,22 @@ kt1cx_set :: proc(kt: KT1CX_Byte, key: u64, value: []byte, backing_cells: Alloca
 		return nil
 	}
 }
-kt1cx_assert :: proc(kt: $type / KT1CX) {
-	slice_assert(kt.table)
-}
-kt1cx_byte :: proc(kt: $type / KT1CX) -> KT1CX_Byte { return { 
-	slice( transmute([^]byte) cursor(kt.table), len(kt.table)) 
-} }
+kt1cx_assert :: #force_inline proc(kt: $type / KT1CX) { slice_assert(kt.table) }
+kt1cx_byte   :: #force_inline proc(kt: $type / KT1CX) -> KT1CX_Byte { return { slice( transmute([^]byte) cursor(kt.table), len(kt.table)) } }
 //endregion Key Table 1-Layer Chained-Chunked-Cells (KT1CX)
 
 //region String Operations
-char_is_upper :: proc(c: u8) -> b32 { return('A' <= c && c <= 'Z') }
-char_to_lower :: proc(c: u8) -> u8  { c:=c; if (char_is_upper(c)) { c += ('a' - 'A') }; return (c) }
+char_is_upper :: #force_inline proc(c: u8) -> b32 { return('A' <= c && c <= 'Z') }
+char_to_lower :: #force_inline proc(c: u8) -> u8  { c:=c; if (char_is_upper(c)) { c += ('a' - 'A') }; return (c) }
 
-integer_symbols :: proc(value: u8) -> u8 {
+integer_symbols :: #force_inline proc(value: u8) -> u8 {
 	@static lookup_table: [16]u8 = { '0','1','2','3','4','5','6','7','8','9','A','B','C','D','E','F', }; 
 	return  lookup_table[value]; 
 }
 
-str8_to_cstr_capped :: proc(content: string, mem: []byte) -> cstring {
+str8_to_cstr_capped :: #force_inline proc(content: string, mem: []byte) -> cstring {
 	copy_len := min(len(content), len(mem) - 1)
-	if copy_len > 0 {
-		copy(mem[:copy_len], transmute([]byte) content)
-	}
+	if copy_len > 0 { copy(mem[:copy_len], transmute([]byte) content) }
 	mem[copy_len] = 0
 	return transmute(cstring) raw_data(mem)
 }
@@ -1184,7 +1111,6 @@ str8_from_u32 :: proc(ainfo: AllocatorInfo, num: u32, radix: u32 = 10, min_digit
 	}
 	return result
 }
-
 str8_fmt_kt1l :: proc(ainfo: AllocatorInfo, _buffer: ^[]byte, table: []KTL_Slot(string), fmt_template: string) -> string {
 	buffer := _buffer^
 	slice_assert(buffer)
@@ -1264,15 +1190,14 @@ str8_fmt_kt1l :: proc(ainfo: AllocatorInfo, _buffer: ^[]byte, table: []KTL_Slot(
 	result := transmute(string) slice(cursor(buffer), len(buffer) - buffer_remaining)
 	return result
 }
-
-str8_fmt_backed :: proc(tbl_ainfo, buf_ainfo: AllocatorInfo, fmt_template: string, entries: [][2]string) -> string {
+str8_fmt_backed :: #force_inline proc(tbl_ainfo, buf_ainfo: AllocatorInfo, fmt_template: string, entries: [][2]string) -> string {
 	kt: []KTL_Slot(string); ktl_populate_slice_a2_str(& kt, tbl_ainfo, entries)
 	buf_size := Kilo * 64
 	buffer   := mem_alloc(buf_ainfo, buf_size)
 	result   := str8_fmt_kt1l(buf_ainfo, & buffer, kt, fmt_template)
 	return result
 }
-str8_fmt_tmp :: proc(fmt_template: string, entries: [][2]string) -> string {
+str8_fmt_tmp :: #force_inline proc(fmt_template: string, entries: [][2]string) -> string {
 	@static tbl_mem: [Kilo * 32]byte; tbl_arena := farena_make(tbl_mem[:])
 	@static buf_mem: [Kilo * 64]byte; buffer := buf_mem[:]
 	kt: []KTL_Slot(string); ktl_populate_slice_a2_str(& kt, ainfo(& tbl_arena), entries)
@@ -1317,7 +1242,7 @@ str8cache_init :: proc(cache: ^Str8Cache, str_reserve, cell_reserve, tbl_backing
 	kt1cx_init(info, m, transmute(^KT1CX_Byte) & cache.kt)
 	return
 }
-str8cache_make :: proc(str_reserve, cell_reserve, tbl_backing: AllocatorInfo, cell_pool_size, table_size: int) -> Str8Cache { 
+str8cache_make :: #force_inline proc(str_reserve, cell_reserve, tbl_backing: AllocatorInfo, cell_pool_size, table_size: int) -> Str8Cache { 
 	cache : Str8Cache; str8cache_init(& cache, str_reserve, cell_reserve, tbl_backing, cell_pool_size, table_size); return cache 
 }
 str8cache_clear :: proc(kt: KT1CX_Str8) {
@@ -1368,11 +1293,10 @@ str8cache_set :: proc(kt: KT1CX_Str8, key: u64, value: string, str_reserve, cell
 	}
 	return result
 }
-cache_str8 :: proc(cache: ^Str8Cache, str: string) -> string {
+cache_str8 :: #force_inline proc(cache: ^Str8Cache, str: string) -> string {
 	assert(cache != nil)
 	key: u64 = 0; hash64_fnv1a(& key, transmute([]byte) str)
-	result  := str8cache_set(cache.kt, key, str, cache.str_reserve, cache.cell_reserve)
-	return result ^
+	return str8cache_set(cache.kt, key, str, cache.str_reserve, cache.cell_reserve) ^
 }
 
 Str8Gen :: struct {
@@ -1389,9 +1313,9 @@ str8gen_init :: proc(gen: ^Str8Gen, ainfo: AllocatorInfo) {
 	gen.len = 0
 	gen.cap = Kilo * 4
 }
-str8gen_make :: proc(ainfo: AllocatorInfo) -> Str8Gen { gen: Str8Gen; str8gen_init(& gen, ainfo); return gen }
-str8gen_to_bytes  :: proc(gen: Str8Gen) -> []byte { return transmute([]byte) SliceByte {data = gen.ptr, len = gen.cap} }
-str8_from_str8gen :: proc(gen: Str8Gen) -> string { return transmute(string) SliceByte {data = gen.ptr, len = gen.len} }
+str8gen_make      :: #force_inline proc(ainfo: AllocatorInfo) -> Str8Gen { gen: Str8Gen; str8gen_init(& gen, ainfo); return gen }
+str8gen_to_bytes  :: #force_inline proc(gen: Str8Gen)         -> []byte  { return transmute([]byte) SliceByte {data = gen.ptr, len = gen.cap} }
+str8_from_str8gen :: #force_inline proc(gen: Str8Gen)         -> string  { return transmute(string) SliceByte {data = gen.ptr, len = gen.len} }
 
 str8gen_append_str8 :: proc(gen: ^Str8Gen, str: string) {
 	result := mem_grow(gen.backing, str8gen_to_bytes(gen ^), len(str) + gen.len)
@@ -1515,9 +1439,8 @@ api_file_read_contents :: proc(result: ^FileOpInfo, path: string, backing: Alloc
 	result.content = slice(cursor(buffer), cast(int) file_size.QuadPart)
 	return
 }
-file_read_contents_stack :: proc(path: string, backing: AllocatorInfo, zero_backing: b32 = false) -> FileOpInfo {
-	result : FileOpInfo; api_file_read_contents(& result, path, backing, zero_backing)
-	return result
+file_read_contents_stack :: #force_inline proc(path: string, backing: AllocatorInfo, zero_backing: b32 = false) -> FileOpInfo {
+	result: FileOpInfo; api_file_read_contents(& result, path, backing, zero_backing) return result
 }
 file_write_str8 :: proc(path, content: string) {
 	string_assert(path)
@@ -1604,55 +1527,54 @@ api_watl_lex :: proc(info: ^WATL_LexInfo, source: string,
 		alloc_tok :: #force_inline proc(ainfo: AllocatorInfo) -> ^Raw_String { 
 			return alloc_type(ainfo, Raw_String, align_of(Raw_String), true) 
 		}
-		#partial switch cast(WATL_TokKind) code
-		{
-			case .Space: fallthrough
-			case .Tab: 
-				if prev[0] != src_cursor[0] {
-					new_tok       := alloc_tok(ainfo_toks); if cursor(new_tok)[-1:] != tok && tok != nil { 
-						slice_constraint_fail(info, ainfo_msgs, new_tok, & msg_last); 
-						return 
-					}
-					tok            = new_tok
-					tok^           = transmute(Raw_String) slice(src_cursor, 0)
-					was_formatting = true
-					num           += 1
-				}
-				src_cursor = src_cursor[1:]
-				tok.len   += 1
-			case .Line_Feed:
-				new_tok       := alloc_tok(ainfo_toks); if cursor(new_tok)[-1:] != tok && tok != nil{ 
-					slice_constraint_fail(info, ainfo_msgs, new_tok, & msg_last);
+		#partial switch cast(WATL_TokKind) code {
+		case .Space: fallthrough
+		case .Tab: 
+			if prev[0] != src_cursor[0] {
+				new_tok       := alloc_tok(ainfo_toks); if cursor(new_tok)[-1:] != tok && tok != nil { 
+					slice_constraint_fail(info, ainfo_msgs, new_tok, & msg_last); 
 					return 
 				}
 				tok            = new_tok
-				tok^           = transmute(Raw_String) slice(src_cursor, 1)
-				src_cursor     = src_cursor[1:]
+				tok^           = transmute(Raw_String) slice(src_cursor, 0)
 				was_formatting = true
 				num           += 1
-			case .Carriage_Return:
+			}
+			src_cursor = src_cursor[1:]
+			tok.len   += 1
+		case .Line_Feed:
+			new_tok       := alloc_tok(ainfo_toks); if cursor(new_tok)[-1:] != tok && tok != nil{ 
+				slice_constraint_fail(info, ainfo_msgs, new_tok, & msg_last);
+				return 
+			}
+			tok            = new_tok
+			tok^           = transmute(Raw_String) slice(src_cursor, 1)
+			src_cursor     = src_cursor[1:]
+			was_formatting = true
+			num           += 1
+		case .Carriage_Return:
+			new_tok       := alloc_tok(ainfo_toks); if cursor(new_tok)[-1:] != tok && tok != nil {
+				slice_constraint_fail(info, ainfo_msgs, new_tok, & msg_last); 
+				return
+			}
+			tok            = new_tok
+			tok^           = transmute(Raw_String) slice(src_cursor, 2)
+			src_cursor     = src_cursor[1:]
+			was_formatting = true
+			num           += 1
+		case:
+			if (was_formatting) {
 				new_tok       := alloc_tok(ainfo_toks); if cursor(new_tok)[-1:] != tok && tok != nil {
-					slice_constraint_fail(info, ainfo_msgs, new_tok, & msg_last); 
+					slice_constraint_fail(info, ainfo_msgs, new_tok, & msg_last);
 					return
 				}
 				tok            = new_tok
-				tok^           = transmute(Raw_String) slice(src_cursor, 2)
-				src_cursor     = src_cursor[1:]
-				was_formatting = true
+				tok^           = transmute(Raw_String) slice(src_cursor, 0)
+				was_formatting = false;
 				num           += 1
-			case:
-				if (was_formatting) {
-					new_tok       := alloc_tok(ainfo_toks); if cursor(new_tok)[-1:] != tok && tok != nil {
-						slice_constraint_fail(info, ainfo_msgs, new_tok, & msg_last);
-						return
-					}
-					tok            = new_tok
-					tok^           = transmute(Raw_String) slice(src_cursor, 0)
-					was_formatting = false;
-					num           += 1
-				}
-				src_cursor  = src_cursor[1:]
-				tok.len    += 1
+			}
+			src_cursor  = src_cursor[1:]
+			tok.len    += 1
 		}
 		prev = src_cursor[-1:]
 		code = src_cursor[0]
@@ -1729,28 +1651,25 @@ api_watl_parse :: proc(info: ^WATL_ParseInfo, tokens: []WATL_Tok,
 	info_lines ^ = { transmute([^]WATL_Node) line, 0 }
 	for & token in tokens
 	{
-		#partial switch cast(WATL_TokKind) token[0]
-		{
-			case .Carriage_Return: fallthrough
-			case .Line_Feed:
-				new_line := alloc_type(ainfo_lines, WATL_Line); if cursor(new_line)[-1:] != transmute(^[]string)line {
-					info.signal |= { .MemFail_SliceConstraintFail }
-					msg := alloc_type(ainfo_msgs, WATL_ParseMsg)
-					msg.content = "Line slice allocation was not contiguous"
-					msg.pos     = { cast(i32) len(info.lines), cast(i32) line.len }
-					msg.line    = transmute(^[]WATL_Node) line
-					msg.tok     = & token
-					sll_queue_push_n(& info.msgs, & msg_last, & msg)
-					assert(failon_slice_constraint_fail == false)
-					return
-				}
-				line            = transmute(^SliceRaw(WATL_Node)) new_line
-				line.data       = curr
-				info_lines.len += 1
-				continue
-
-			case:
-			break;
+		#partial switch cast(WATL_TokKind) token[0] {
+		case .Carriage_Return: fallthrough
+		case .Line_Feed:
+			new_line := alloc_type(ainfo_lines, WATL_Line); if cursor(new_line)[-1:] != transmute(^[]string)line {
+				info.signal |= { .MemFail_SliceConstraintFail }
+				msg := alloc_type(ainfo_msgs, WATL_ParseMsg)
+				msg.content = "Line slice allocation was not contiguous"
+				msg.pos     = { cast(i32) len(info.lines), cast(i32) line.len }
+				msg.line    = transmute(^[]WATL_Node) line
+				msg.tok     = & token
+				sll_queue_push_n(& info.msgs, & msg_last, & msg)
+				assert(failon_slice_constraint_fail == false)
+				return
+			}
+			line            = transmute(^SliceRaw(WATL_Node)) new_line
+			line.data       = curr
+			info_lines.len += 1
+			continue
+		case: break;
 		}
 		curr ^ = cache_str8(str_cache, token)
 		new_node := alloc_type(ainfo_nodes, WATL_Node); if cursor(new_node)[-1:] != curr {
@@ -1799,11 +1718,10 @@ watl_dump_listing :: proc(buffer: AllocatorInfo, lines: []WATL_Line) -> string {
 		for chunk in line 
 		{
 			id : string
-			#partial switch cast(WATL_TokKind) chunk[0]
-			{
-				case .Space: id = "Space"
-				case .Tab:   id = "Tab"
-				case:        id = "Visible"
+			#partial switch cast(WATL_TokKind) chunk[0] {
+			case .Space: id = "Space"
+			case .Tab:   id = "Tab"
+			case:        id = "Visible"
 			}
 			str8gen_append_fmt(& result, "\t<id>(<size>): '<chunk>'\n", {
 				{ "id",    id },
