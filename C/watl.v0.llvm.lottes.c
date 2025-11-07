@@ -934,8 +934,8 @@ typedef def_enum(U4, WATL_LexStatus) {
 	WATL_LexStatus_MemFail_SliceConstraintFail = (1 << 0),
 };
 typedef def_struct(WATL_Pos) {
-	U4 line;
-	U4 column;
+	S4 line;
+	S4 column;
 };
 typedef def_struct(WATL_LexMsg) {
 	WATL_LexMsg* next;
@@ -1019,9 +1019,30 @@ enum {
 	def_field(Opts_watl_parse,ainfo_msgs),
 	def_field(Opts_watl_parse,ainfo_nodes),
 	def_field(Opts_watl_parse,ainfo_lines),
-	def_field(Opts_watl_parse,str_cache),
-	def_field(Opts_watl_parse,failon_slice_constraint_fail),
+def_field(Opts_watl_parse,str_cache),
+def_field(Opts_watl_parse,failon_slice_constraint_fail),
 };
+
+I_ U8 watl_alloc_bytes(U8 proc, U8 data, U8 size, U8 alignment, B4 no_zero) {
+	uvar(Slice_Mem, allocation);
+	mem__alloc__u(u8_(allocation), proc, data, size, alignment, no_zero);
+	return u8_r(u8_(allocation) + Slice_ptr)[0];
+}
+I_ U8 watl_alloc_tok(U8 proc, U8 data) {
+	return watl_alloc_bytes(proc, data, size_of(WATL_Tok), alignof(WATL_Tok), 1);
+}
+I_ U8 watl_alloc_lex_msg(U8 proc, U8 data) {
+	return watl_alloc_bytes(proc, data, size_of(WATL_LexMsg), alignof(WATL_LexMsg), 0);
+}
+I_ U8 watl_alloc_line(U8 proc, U8 data) {
+	return watl_alloc_bytes(proc, data, size_of(WATL_Line), alignof(WATL_Line), 1);
+}
+I_ U8 watl_alloc_node(U8 proc, U8 data) {
+	return watl_alloc_bytes(proc, data, size_of(WATL_Node), alignof(WATL_Node), 1);
+}
+I_ U8 watl_alloc_parse_msg(U8 proc, U8 data) {
+	return watl_alloc_bytes(proc, data, size_of(WATL_ParseMsg), alignof(WATL_ParseMsg), 0);
+}
 
 S_ void watl_lex__u  (U8 info, U8 source, U8 opts);
 S_ void watl_parse__u(U8 info, U8 tokens, U8 opts);
@@ -2479,12 +2500,6 @@ I_ void file_write_str8(Str8 path, Str8 content) {
 #pragma endregion File System
 
 #pragma region WATL
-#define WATL_ALLOC_STRUCT(dest, proc, data, type, zero)                                         \
-	do {                                                                                        \
-		uvar(Slice_Mem, _alloc_slice);                                                          \
-		mem__alloc__u(u8_(_alloc_slice), proc, data, size_of(type), alignof(type), zero);      \
-		dest = u8_r(u8_(_alloc_slice) + Slice_ptr)[0];                                         \
-	} while (0)
 
 S_ void watl_lex__u(U8 info, U8 source, U8 opts) {
 	if (info == null || source == null || opts == null) { return; }
@@ -2515,17 +2530,13 @@ S_ void watl_lex__u(U8 info, U8 source, U8 opts) {
 	U8 end    = src_ptr + src_len;
 	U1 prev_code = 0;
 
-#define WATL_ALLOC_TOK(dest) WATL_ALLOC_STRUCT(dest, toks_proc, toks_data, WATL_Tok, 1)
-#define WATL_ALLOC_LEX_MSG(dest) WATL_ALLOC_STRUCT(dest, msgs_proc, msgs_data, WATL_LexMsg, 0)
-
 	while (cursor < end) {
 		U1 code = u1_r(cursor)[0];
 		switch (code) {
 		case WATL_Tok_Space:
 		case WATL_Tok_Tab: {
 			if (tok == 0 || prev_code != code) {
-				U8 new_tok = 0;
-				WATL_ALLOC_TOK(new_tok);
+				U8 new_tok = watl_alloc_tok(toks_proc, toks_data);
 				if (tok != 0 && new_tok != tok + size_of(WATL_Tok)) { goto slice_constraint_fail; }
 				tok = new_tok;
 				if (first_tok == 0) { first_tok = tok; }
@@ -2539,8 +2550,7 @@ S_ void watl_lex__u(U8 info, U8 source, U8 opts) {
 		} break;
 
 		case WATL_Tok_LineFeed: {
-			U8 new_tok = 0;
-			WATL_ALLOC_TOK(new_tok);
+			U8 new_tok = watl_alloc_tok(toks_proc, toks_data);
 			if (tok != 0 && new_tok != tok + size_of(WATL_Tok)) { goto slice_constraint_fail; }
 			tok = new_tok;
 			if (first_tok == 0) { first_tok = tok; }
@@ -2552,8 +2562,7 @@ S_ void watl_lex__u(U8 info, U8 source, U8 opts) {
 		} break;
 
 		case WATL_Tok_CarriageReturn: {
-			U8 new_tok = 0;
-			WATL_ALLOC_TOK(new_tok);
+			U8 new_tok = watl_alloc_tok(toks_proc, toks_data);
 			if (tok != 0 && new_tok != tok + size_of(WATL_Tok)) { goto slice_constraint_fail; }
 			tok = new_tok;
 			if (first_tok == 0) { first_tok = tok; }
@@ -2567,8 +2576,7 @@ S_ void watl_lex__u(U8 info, U8 source, U8 opts) {
 
 		default: {
 			if (was_formatting || tok == 0) {
-				U8 new_tok = 0;
-				WATL_ALLOC_TOK(new_tok);
+				U8 new_tok = watl_alloc_tok(toks_proc, toks_data);
 				if (tok != 0 && new_tok != tok + size_of(WATL_Tok)) { goto slice_constraint_fail; }
 				tok = new_tok;
 				if (first_tok == 0) { first_tok = tok; }
@@ -2591,15 +2599,14 @@ S_ void watl_lex__u(U8 info, U8 source, U8 opts) {
 
 slice_constraint_fail: {
 	u4_r(info + WATL_LexInfo_signal)[0] |= WATL_LexStatus_MemFail_SliceConstraintFail;
-	U8 msg = 0;
-	WATL_ALLOC_LEX_MSG(msg);
+	U8 msg = watl_alloc_lex_msg(msgs_proc, msgs_data);
 	u8_r(msg + WATL_LexMsg_next)[0] = 0;
 	Str8 msg_content = lit("Token slice allocation was not contiguous");
 	u8_r(msg + WATL_LexMsg_content + Str8_ptr)[0] = msg_content.ptr;
 	u8_r(msg + WATL_LexMsg_content + Str8_len)[0] = msg_content.len;
 	u8_r(msg + WATL_LexMsg_tok)[0] = tok;
-	u4_r(msg + WATL_LexMsg_pos + WATL_Pos_line)[0]   = cast(U4, -1);
-	u4_r(msg + WATL_LexMsg_pos + WATL_Pos_column)[0] = cast(U4, -1);
+	u4_r(msg + WATL_LexMsg_pos + WATL_Pos_line)[0]   = cast(S4, -1);
+	u4_r(msg + WATL_LexMsg_pos + WATL_Pos_column)[0] = cast(S4, -1);
 	if (u8_r(info + WATL_LexInfo_msgs)[0] == 0) {
 		u8_r(info + WATL_LexInfo_msgs)[0] = msg;
 	} else {
@@ -2609,9 +2616,6 @@ slice_constraint_fail: {
 	assert(fail_slice == false);
 	return;
 }
-#undef WATL_ALLOC_TOK
-#undef WATL_ALLOC_LEX_MSG
-#undef WATL_ALLOC_STRUCT
 }
 
 I_ void api_watl_lex(WATL_LexInfo_R info, Str8 source, Opts_watl_lex*R_ opts) {
@@ -2626,8 +2630,116 @@ I_ WATL_LexInfo watl__lex(Str8 source, Opts_watl_lex*R_ opts) {
 	return info;
 }
 
-S_ void watl_parse__u(U8 info, U8 tokens, U8 opts) {
-	(void)info; (void)tokens; (void)opts;
+S_ void watl_parse__u(U8 info, U8 tokens_slice, U8 opts) {
+	if (info == null || tokens_slice == null || opts == null) { return; }
+	U8 toks_ptr = u8_r(tokens_slice + Slice_ptr)[0];
+	U8 toks_len = u8_r(tokens_slice + Slice_len)[0];
+	if (toks_ptr == 0 || toks_len == 0) { return; }
+
+	U8 ainfo_lines = opts + Opts_watl_parse_ainfo_lines;
+	U8 ainfo_msgs  = opts + Opts_watl_parse_ainfo_msgs;
+	U8 ainfo_nodes = opts + Opts_watl_parse_ainfo_nodes;
+	U8 str_cache   = u8_r(opts + Opts_watl_parse_str_cache)[0];
+	assert(u8_r(ainfo_lines + AllocatorInfo_proc)[0] != null);
+	assert(u8_r(ainfo_msgs  + AllocatorInfo_proc)[0] != null);
+	assert(u8_r(ainfo_nodes + AllocatorInfo_proc)[0] != null);
+	assert(str_cache != 0);
+
+	U8 lines_proc = u8_r(ainfo_lines + AllocatorInfo_proc)[0];
+	U8 lines_data = u8_r(ainfo_lines + AllocatorInfo_data)[0];
+	U8 msgs_proc  = u8_r(ainfo_msgs  + AllocatorInfo_proc)[0];
+	U8 msgs_data  = u8_r(ainfo_msgs  + AllocatorInfo_data)[0];
+	U8 nodes_proc = u8_r(ainfo_nodes + AllocatorInfo_proc)[0];
+	U8 nodes_data = u8_r(ainfo_nodes + AllocatorInfo_data)[0];
+	U1 fail_slice = u1_r(opts + Opts_watl_parse_failon_slice_constraint_fail)[0];
+
+	u8_r(info + WATL_ParseInfo_lines + Slice_ptr)[0] = 0;
+	u8_r(info + WATL_ParseInfo_lines + Slice_len)[0] = 0;
+	u8_r(info + WATL_ParseInfo_msgs)[0] = 0;
+	u4_r(info + WATL_ParseInfo_signal)[0] = 0;
+
+	U8 msg_last = 0;
+	U8 line = watl_alloc_line(lines_proc, lines_data);
+	U8 curr = watl_alloc_node(nodes_proc, nodes_data);
+	u8_r(line + Slice_ptr)[0] = curr;
+	u8_r(line + Slice_len)[0] = 0;
+	u8_r(info + WATL_ParseInfo_lines + Slice_ptr)[0] = line;
+	u8_r(info + WATL_ParseInfo_lines + Slice_len)[0] = 0;
+
+	U8 token = 0;
+	for (U8 idx = 0; idx < toks_len; ++idx) {
+		token = toks_ptr + idx * size_of(WATL_Tok);
+		U8 token_ptr = u8_r(token + Str8_ptr)[0];
+		U1 first_char = token_ptr ? u1_r(token_ptr)[0] : 0;
+
+		switch (first_char) {
+		case WATL_Tok_CarriageReturn:
+		case WATL_Tok_LineFeed: {
+			U8 new_line = watl_alloc_line(lines_proc, lines_data);
+			if (new_line != line + size_of(WATL_Line)) { goto line_slice_fail; }
+			line = new_line;
+			U8 new_node = watl_alloc_node(nodes_proc, nodes_data);
+			curr = new_node;
+			u8_r(line + Slice_ptr)[0] = curr;
+			u8_r(line + Slice_len)[0] = 0;
+			u8_r(info + WATL_ParseInfo_lines + Slice_len)[0] += 1;
+			continue;
+		} break;
+		default: break;
+		}
+
+		uvar(Str8, cached) = {0};
+		cache_str8__u(u8_(& cached), str_cache, token);
+		u8_r(curr + Str8_ptr)[0] = u8_r(u8_(& cached) + Str8_ptr)[0];
+		u8_r(curr + Str8_len)[0] = u8_r(u8_(& cached) + Str8_len)[0];
+		U8 new_node = watl_alloc_node(nodes_proc, nodes_data);
+		if (new_node != curr + size_of(WATL_Node)) { goto node_slice_fail; }
+		curr = new_node;
+		u8_r(line + Slice_len)[0] += 1;
+	}
+	return;
+
+line_slice_fail: {
+	u4_r(info + WATL_ParseInfo_signal)[0] |= WATL_ParseStatus_MemFail_SliceConstraintFail;
+	U8 msg = watl_alloc_parse_msg(msgs_proc, msgs_data);
+	Str8 content = lit("Line slice allocation was not contiguous");
+	u8_r(msg + WATL_ParseMsg_content + Str8_ptr)[0] = content.ptr;
+	u8_r(msg + WATL_ParseMsg_content + Str8_len)[0] = content.len;
+	u8_r(msg + WATL_ParseMsg_line)[0] = line;
+	u8_r(msg + WATL_ParseMsg_tok)[0] = token;
+	u4_r(msg + WATL_ParseMsg_pos + WATL_Pos_line)[0]   = cast(S4, u8_r(info + WATL_ParseInfo_lines + Slice_len)[0]);
+	u4_r(msg + WATL_ParseMsg_pos + WATL_Pos_column)[0] = cast(S4, u8_r(line + Slice_len)[0]);
+	u8_r(msg + WATL_ParseMsg_next)[0] = 0;
+	if (u8_r(info + WATL_ParseInfo_msgs)[0] == 0) {
+		u8_r(info + WATL_ParseInfo_msgs)[0] = msg;
+	} else {
+		u8_r(msg_last + WATL_ParseMsg_next)[0] = msg;
+	}
+	msg_last = msg;
+	assert(fail_slice == false);
+	return;
+}
+node_slice_fail: {
+	u4_r(info + WATL_ParseInfo_signal)[0] |= WATL_ParseStatus_MemFail_SliceConstraintFail;
+	U8 msg = watl_alloc_parse_msg(msgs_proc, msgs_data);
+	Str8 content = lit("Nodes slice allocation was not contiguous");
+	u8_r(msg + WATL_ParseMsg_content + Str8_ptr)[0] = content.ptr;
+	u8_r(msg + WATL_ParseMsg_content + Str8_len)[0] = content.len;
+	u8_r(msg + WATL_ParseMsg_line)[0] = line;
+	u8_r(msg + WATL_ParseMsg_tok)[0] = token;
+	u4_r(msg + WATL_ParseMsg_pos + WATL_Pos_line)[0]   = cast(S4, u8_r(info + WATL_ParseInfo_lines + Slice_len)[0]);
+	u4_r(msg + WATL_ParseMsg_pos + WATL_Pos_column)[0] = cast(S4, u8_r(line + Slice_len)[0]);
+	u8_r(msg + WATL_ParseMsg_next)[0] = 0;
+	if (u8_r(info + WATL_ParseInfo_msgs)[0] == 0) {
+		u8_r(info + WATL_ParseInfo_msgs)[0] = msg;
+	} else {
+		u8_r(msg_last + WATL_ParseMsg_next)[0] = msg;
+	}
+	msg_last = msg;
+	assert(fail_slice == false);
+	return;
+}
+
 }
 
 I_ void api_watl_parse(WATL_ParseInfo_R info, Slice_WATL_Tok tokens, Opts_watl_parse*R_ opts) {
@@ -2643,7 +2755,72 @@ I_ WATL_ParseInfo watl__parse(Slice_WATL_Tok tokens, Opts_watl_parse*R_ opts) {
 }
 
 S_ void watl_dump_listing__u(U8 result, U8 buffer_ainfo, U8 lines) {
-	(void)result; (void)buffer_ainfo; (void)lines;
+	if (result == null || buffer_ainfo == null) { return; }
+	U8 buf_proc = u8_r(buffer_ainfo + AllocatorInfo_proc)[0];
+	U8 buf_data = u8_r(buffer_ainfo + AllocatorInfo_data)[0];
+	assert(buf_proc != null);
+
+	uvar(Str8Gen, gen) = {0};
+	str8gen_init__u(u8_(gen), buffer_ainfo);
+
+	LP_ B1 scratch[kilo(64)];
+	LP_ B1 arena_mem[size_of(FArena)];
+	Slice_Mem scratch_mem = slice_fmem(scratch);
+	farena_init__u(u8_(arena_mem), scratch_mem.ptr, scratch_mem.len);
+	U8 sarena = u8_(arena_mem);
+	AllocatorInfo sinfo = (AllocatorInfo){ .proc = farena_allocator_proc, .data = sarena };
+
+	U8 lines_ptr = u8_r(lines + Slice_ptr)[0];
+	U8 lines_len = u8_r(lines + Slice_len)[0];
+	U4 line_num = 0;
+
+	Str8 header_fmt = lit("Line <line_num> - Chunks <chunk_num>:\n");
+	Str8 chunk_fmt  = lit("\t<id>(<size>): '<chunk>'\n");
+	Str8 lit_visible = lit("Visible");
+	Str8 lit_space   = lit("Space");
+	Str8 lit_tab     = lit("Tab");
+
+	for (U8 idx = 0; idx < lines_len; ++idx) {
+		line_num += 1;
+		U8 line = lines_ptr + idx * size_of(WATL_Line);
+		U8 chunks_ptr = u8_r(line + Slice_ptr)[0];
+		U8 chunks_len = u8_r(line + Slice_len)[0];
+
+		Str8 str_line_num  = str8_from_u32(sinfo, line_num,             10, 0, 0);
+		Str8 str_chunk_num = str8_from_u32(sinfo, cast(U4, chunks_len), 10, 0, 0);
+		A2_Str8 header_entries[2] = {
+			{ lit("line_num"),  str_line_num },
+			{ lit("chunk_num"), str_chunk_num },
+		};
+		Slice_A2_Str8 header_slice = { header_entries, 2 };
+		str8gen__append_fmt__u(u8_(gen), u8_(& header_fmt), u8_(& header_slice));
+
+		for (U8 chunk_idx = 0; chunk_idx < chunks_len; ++chunk_idx) {
+			U8 chunk = chunks_ptr + chunk_idx * size_of(WATL_Node);
+			U8 chunk_ptr = u8_r(chunk + Str8_ptr)[0];
+			U8 chunk_len = u8_r(chunk + Str8_len)[0];
+			Str8 id = lit_visible;
+			if (chunk_ptr != 0) {
+				U1 ch = u1_r(chunk_ptr)[0];
+				if (ch == WATL_Tok_Space) { id = lit_space; }
+				else if (ch == WATL_Tok_Tab) { id = lit_tab; }
+			}
+			Str8 str_chunk_len = str8_from_u32(sinfo, cast(U4, chunk_len), 10, 0, 0);
+			Str8 chunk_str = { chunk_ptr, chunk_len };
+			A2_Str8 chunk_entries[3] = {
+				{ lit("id"),    id },
+				{ lit("size"),  str_chunk_len },
+				{ lit("chunk"), chunk_str },
+			};
+			Slice_A2_Str8 chunk_slice = { chunk_entries, 3 };
+			str8gen__append_fmt__u(u8_(gen), u8_(& chunk_fmt), u8_(& chunk_slice));
+		}
+
+		farena_reset__u(sarena);
+	}
+
+	u8_r(result + Str8_ptr)[0] = u8_r(u8_(gen) + Str8Gen_ptr)[0];
+	u8_r(result + Str8_len)[0] = u8_r(u8_(gen) + Str8Gen_len)[0];
 }
 
 I_ Str8 watl_dump_listing(AllocatorInfo buffer, Slice_WATL_Line lines) {
