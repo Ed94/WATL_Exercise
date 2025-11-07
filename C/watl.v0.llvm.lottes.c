@@ -1711,13 +1711,19 @@ I_ AllocatorSP arena_save(Arena_R arena) {
 I_ void ktl_populate_slice_a2_str8(U8 kt, U8 backing_ptr, U8 backing_len, U8 values) {
 	assert(kt != null);
 	U8 values_len = u8_r(values + Slice_len)[0];
-	if (values_len == 0) return;
+	if (values_len == 0) { return; }
 	mem__alloc__u(kt, backing_ptr, backing_len, size_of(KTL_Slot_Str8) * values_len, 0, false);
-	for (U8 id = 0; id < values_len; ++id) { 
-		U8 kt_slot = kt + Slice_ptr * id; 
-		U8 value   = u8_r(values + Slice_ptr + size_of(A2_Str8) * id)[0];
-		mem_copy       (kt_slot + KTL_Slot_value, value + size_of(Str8) * 1, size_of(Str8));
-		hash64_fnv1a__u(kt_slot + KTL_Slot_key, value, size_of(Str8), 0);
+	U8 slots_ptr  = u8_r(kt + Slice_ptr)[0];
+	U8 values_ptr = u8_r(values + Slice_ptr)[0];
+	for (U8 id = 0; id < values_len; ++id) {
+		U8 kt_slot = slots_ptr  + id * size_of(KTL_Slot_Str8);
+		U8 pair    = values_ptr + id * size_of(A2_Str8);
+		U8 key_str   = pair;
+		U8 value_str = pair + size_of(Str8);
+		mem_copy(kt_slot + KTL_Slot_value, value_str, size_of(Str8));
+		U8 key_ptr = u8_r(key_str + Str8_ptr)[0];
+		U8 key_len = u8_r(key_str + Str8_len)[0];
+		hash64_fnv1a__u(kt_slot + KTL_Slot_key, key_ptr, key_len, 0);
 	}
 }
 #pragma endregion KTL
@@ -1971,9 +1977,11 @@ S_ void str8__fmt_ktl__u(U8 result, U8 ainfo_proc, U8 ainfo_data, U8 buffer_slic
 	assert(fmt_ptr != null);
 
 	if (ainfo_proc != null) {
-		AllocatorQueryInfo query = {0};
-		allocator_query__u(ainfo_proc, ainfo_data, u8_(& query));
-		assert((query.features & AllocatorQuery_Grow) != 0);
+		LP_ B1 query_mem[size_of(AllocatorQueryInfo)] = {0};
+		U8   query_addr = u8_(query_mem);
+		allocator_query__u(ainfo_proc, ainfo_data, query_addr);
+		U4   features   = u4_r(query_addr + AllocatorQueryInfo_features)[0];
+		assert((features & AllocatorQuery_Grow) != 0);
 	}
 
 	U8 cursor_buffer    = buffer_ptr;
@@ -1988,14 +1996,12 @@ S_ void str8__fmt_ktl__u(U8 result, U8 ainfo_proc, U8 ainfo_data, U8 buffer_slic
 		while ((cursor_fmt + copy_offset) < fmt_end && u1_r(cursor_fmt + copy_offset)[0] != '<') {
 			++ copy_offset;
 		}
-		if (copy_offset) {
-			mem_copy(cursor_buffer, cursor_fmt, copy_offset);
-			buffer_remaining -= copy_offset;
-			left_fmt         -= copy_offset;
-			cursor_buffer    += copy_offset;
-			cursor_fmt       += copy_offset;
-			if (left_fmt == 0) { break; }
-		}
+		mem_copy(cursor_buffer, cursor_fmt, copy_offset);
+		buffer_remaining -= copy_offset;
+		left_fmt         -= copy_offset;
+		cursor_buffer    += copy_offset;
+		cursor_fmt       += copy_offset;
+		if (left_fmt == 0) { break; }
 
 		if ((cursor_fmt < fmt_end) && u1_r(cursor_fmt)[0] == '<') {
 			U8 token_cursor = cursor_fmt + 1;
@@ -2076,11 +2082,13 @@ I_ Str8 str8__fmt_ktl(AllocatorInfo ainfo, Slice_Mem*R_ buffer, KTL_Str8 table, 
 }
 S_ void str8__fmt_backed__u(U8 result, U8 tbl_backing_proc, U8 tbl_backing_data, U8 buf_backing_proc, U8 buf_backing_data, U8 fmt_slice, U8 entries_slice) {
 	assert(result != null);
-	KTL_Str8 kt = {0};
-	ktl_populate_slice_a2_str8(u8_(& kt), tbl_backing_proc, tbl_backing_data, entries_slice);
-	uvar(Slice_Mem, buffer);
-	mem__alloc__u(u8_(buffer), buf_backing_proc, buf_backing_data, kilo(64), 0, 1);
-	str8__fmt_ktl__u(result, buf_backing_proc, buf_backing_data, u8_(buffer), u8_(& kt), fmt_slice);
+	LP_ B1 kt_mem[size_of(KTL_Str8)] = {0};
+	U8 kt_addr = u8_(kt_mem);
+	ktl_populate_slice_a2_str8(kt_addr, tbl_backing_proc, tbl_backing_data, entries_slice);
+	uvar(Slice_Mem, buffer) = {0};
+	U8 buffer_addr = u8_(buffer);
+	mem__alloc__u(buffer_addr, buf_backing_proc, buf_backing_data, kilo(64), 0, 1);
+	str8__fmt_ktl__u(result, buf_backing_proc, buf_backing_data, buffer_addr, kt_addr, fmt_slice);
 }
 I_ Str8 str8__fmt_backed(AllocatorInfo tbl_backing, AllocatorInfo buf_backing, Str8 fmt_template, Slice_A2_Str8*R_ entries) {
 	Str8 output = {0};
@@ -2101,11 +2109,16 @@ S_ void str8__fmt__u(U8 result, U8 fmt_slice, U8 entries_slice) {
 	LP_ B1 buf_mem[kilo(64)];
 	LP_ B1 tbl_arena_mem[size_of(FArena)];
 	farena_init__u(u8_(tbl_arena_mem), u8_(tbl_mem), size_of(tbl_mem));
-	AllocatorInfo tbl_info = { .proc = farena_allocator_proc, .data = u8_(tbl_arena_mem) };
-	KTL_Str8 kt = {0};
-	ktl_populate_slice_a2_str8(u8_(& kt), u8_(tbl_info.proc), tbl_info.data, entries_slice);
-	Slice_Mem buffer = slice_fmem(buf_mem);
-	str8__fmt_ktl__u(result, 0, 0, u8_(& buffer), u8_(& kt), fmt_slice);
+	U8 tbl_proc = u8_(farena_allocator_proc);
+	U8 tbl_data = u8_(tbl_arena_mem);
+	LP_ B1 kt_mem[size_of(KTL_Str8)] = {0};
+	U8 kt_addr = u8_(kt_mem);
+	ktl_populate_slice_a2_str8(kt_addr, tbl_proc, tbl_data, entries_slice);
+	uvar(Slice_Mem, buffer_slice) = {0};
+	U8 buffer_addr = u8_(buffer_slice);
+	u8_r(buffer_addr + Slice_ptr)[0] = u8_(buf_mem);
+	u8_r(buffer_addr + Slice_len)[0] = size_of(buf_mem);
+	str8__fmt_ktl__u(result, 0, 0, buffer_addr, kt_addr, fmt_slice);
 }
 I_ Str8 str8__fmt(Str8 fmt_template, Slice_A2_Str8*R_ entries) {
 	Str8 output = {0};
@@ -2315,9 +2328,10 @@ S_ void str8gen__append_fmt__u(U8 gen, U8 fmt_slice, U8 entries_slice) {
 	assert(gen != null);
 	assert(fmt_slice != null);
 	assert(entries_slice != null);
-	Str8 formatted = {0};
-	str8__fmt__u(u8_(& formatted), fmt_slice, entries_slice);
-	str8gen_append_str8__u(gen, u8_(& formatted));
+	uvar(Str8, formatted) = {0};
+	U8 formatted_addr = u8_(formatted);
+	str8__fmt__u(formatted_addr, fmt_slice, entries_slice);
+	str8gen_append_str8__u(gen, formatted_addr);
 }
 I_ void str8gen__append_fmt(Str8Gen_R gen, Str8 fmt_template, Slice_A2_Str8*R_ entries) {
 	str8gen__append_fmt__u(u8_(gen), u8_(& fmt_template), u8_(entries));
@@ -2534,7 +2548,7 @@ S_ inline void assert_handler( UTF8*R_ condition, UTF8*R_ file, UTF8*R_ function
 #endif
 #pragma endregion Debug
 
-#pragma region WAT
+#pragma region WATL
 S_ void watl_lex__u(U8 info, U8 source, U8 opts) {
 	if (info == null || source == null || opts == null) { return; }
 	U8 src_ptr = u8_r(source + Str8_ptr)[0];
@@ -2806,70 +2820,109 @@ I_ WATL_ParseInfo watl__parse(Slice_WATL_Tok tokens, Opts_watl_parse*R_ opts) {
 S_ void watl_dump_listing__u(U8 result, U8 buffer_ainfo, U8 lines) {
 	if (result == null || buffer_ainfo == null) { return; }
 	U8 buf_proc = u8_r(buffer_ainfo + AllocatorInfo_proc)[0];
-	U8 buf_data = u8_r(buffer_ainfo + AllocatorInfo_data)[0];
 	assert(buf_proc != null);
 
 	uvar(Str8Gen, gen) = {0};
-	str8gen_init__u(u8_(gen), buffer_ainfo);
+	U8 gen_addr = u8_(gen);
+	str8gen_init__u(gen_addr, buffer_ainfo);
 
 	LP_ B1 scratch[kilo(64)];
 	LP_ B1 arena_mem[size_of(FArena)];
-	Slice_Mem scratch_mem = slice_fmem(scratch);
-	farena_init__u(u8_(arena_mem), scratch_mem.ptr, scratch_mem.len);
-	U8 sarena = u8_(arena_mem);
-	AllocatorInfo sinfo = (AllocatorInfo){ .proc = farena_allocator_proc, .data = sarena };
+	farena_init__u(u8_(arena_mem), u8_(scratch), size_of(scratch));
+	U8 sarena     = u8_(arena_mem);
+	U8 sinfo_proc = u8_(farena_allocator_proc);
+	U8 sinfo_data = sarena;
 
 	U8 lines_ptr = u8_r(lines + Slice_ptr)[0];
 	U8 lines_len = u8_r(lines + Slice_len)[0];
-	U4 line_num = 0;
+	U4 line_num  = 0;
 
 	Str8 header_fmt = lit("Line <line_num> - Chunks <chunk_num>:\n");
 	Str8 chunk_fmt  = lit("\t<id>(<size>): '<chunk>'\n");
 	Str8 lit_visible = lit("Visible");
 	Str8 lit_space   = lit("Space");
 	Str8 lit_tab     = lit("Tab");
+	Str8 key_line_num  = lit("line_num");
+	Str8 key_chunk_num = lit("chunk_num");
+	Str8 key_id        = lit("id");
+	Str8 key_size      = lit("size");
+	Str8 key_chunk     = lit("chunk");
 
 	for (U8 idx = 0; idx < lines_len; ++idx) {
 		line_num += 1;
-		U8 line = lines_ptr + idx * size_of(WATL_Line);
-		U8 chunks_ptr = u8_r(line + Slice_ptr)[0];
-		U8 chunks_len = u8_r(line + Slice_len)[0];
+		U8 line_addr  = lines_ptr + idx * size_of(WATL_Line);
+		U8 chunks_ptr = u8_r(line_addr + Slice_ptr)[0];
+		U8 chunks_len = u8_r(line_addr + Slice_len)[0];
 
-		Str8 str_line_num  = str8_from_u32(sinfo, line_num,             10, 0, 0);
-		Str8 str_chunk_num = str8_from_u32(sinfo, cast(U4, chunks_len), 10, 0, 0);
-		A2_Str8 header_entries[2] = {
-			{ lit("line_num"),  str_line_num },
-			{ lit("chunk_num"), str_chunk_num },
-		};
-		Slice_A2_Str8 header_slice = { header_entries, 2 };
-		str8gen__append_fmt__u(u8_(gen), u8_(& header_fmt), u8_(& header_slice));
+		uvar(Str8, str_line_num) = {0};
+		U8 str_line_addr = u8_(str_line_num);
+		str8_from_u32__u(str_line_addr, sinfo_proc, sinfo_data, line_num, 10, 0, 0);
+
+		uvar(Str8, str_chunk_cnt) = {0};
+		U8 str_chunk_cnt_addr = u8_(str_chunk_cnt);
+		str8_from_u32__u(str_chunk_cnt_addr, sinfo_proc, sinfo_data, cast(U4, chunks_len), 10, 0, 0);
+
+		LP_ B1 header_entries_mem[2 * size_of(A2_Str8)] = {0};
+		U8 header_entries = u8_(header_entries_mem);
+		U8 header_entry   = header_entries;
+		mem_copy(header_entry, u8_(& key_line_num), size_of(Str8));
+		mem_copy(header_entry + size_of(Str8), str_line_addr, size_of(Str8));
+		header_entry += size_of(A2_Str8);
+		mem_copy(header_entry, u8_(& key_chunk_num), size_of(Str8));
+		mem_copy(header_entry + size_of(Str8), str_chunk_cnt_addr, size_of(Str8));
+
+		uvar(Slice_Mem, header_slice) = {0};
+		U8 header_slice_addr = u8_(header_slice);
+		u8_r(header_slice_addr + Slice_ptr)[0] = header_entries;
+		u8_r(header_slice_addr + Slice_len)[0] = 2;
+
+		str8gen__append_fmt__u(gen_addr, u8_(& header_fmt), header_slice_addr);
 
 		for (U8 chunk_idx = 0; chunk_idx < chunks_len; ++chunk_idx) {
-			U8 chunk = chunks_ptr + chunk_idx * size_of(WATL_Node);
-			U8 chunk_ptr = u8_r(chunk + Str8_ptr)[0];
-			U8 chunk_len = u8_r(chunk + Str8_len)[0];
-			Str8 id = lit_visible;
+			U8 chunk_addr = chunks_ptr + chunk_idx * size_of(WATL_Node);
+			U8 chunk_ptr  = u8_r(chunk_addr + Str8_ptr)[0];
+			U8 chunk_len  = u8_r(chunk_addr + Str8_len)[0];
+			U8 id_addr    = u8_(& lit_visible);
 			if (chunk_ptr != 0) {
 				U1 ch = u1_r(chunk_ptr)[0];
-				if (ch == WATL_Tok_Space) { id = lit_space; }
-				else if (ch == WATL_Tok_Tab) { id = lit_tab; }
+				if (ch == WATL_Tok_Space)      { id_addr = u8_(& lit_space); }
+				else if (ch == WATL_Tok_Tab) { id_addr = u8_(& lit_tab); }
 			}
-			Str8 str_chunk_len = str8_from_u32(sinfo, cast(U4, chunk_len), 10, 0, 0);
-			Str8 chunk_str = { chunk_ptr, chunk_len };
-			A2_Str8 chunk_entries[3] = {
-				{ lit("id"),    id },
-				{ lit("size"),  str_chunk_len },
-				{ lit("chunk"), chunk_str },
-			};
-			Slice_A2_Str8 chunk_slice = { chunk_entries, 3 };
-			str8gen__append_fmt__u(u8_(gen), u8_(& chunk_fmt), u8_(& chunk_slice));
+
+			uvar(Str8, str_chunk_len) = {0};
+			U8 str_chunk_len_addr = u8_(str_chunk_len);
+			str8_from_u32__u(str_chunk_len_addr, sinfo_proc, sinfo_data, cast(U4, chunk_len), 10, 0, 0);
+
+			uvar(Str8, chunk_str) = {0};
+			U8 chunk_str_addr = u8_(chunk_str);
+			u8_r(chunk_str_addr + Str8_ptr)[0] = chunk_ptr;
+			u8_r(chunk_str_addr + Str8_len)[0] = chunk_len;
+
+			LP_ B1 chunk_entries_mem[3 * size_of(A2_Str8)] = {0};
+			U8 chunk_entries = u8_(chunk_entries_mem);
+			U8 chunk_entry   = chunk_entries;
+			mem_copy(chunk_entry, u8_(& key_id), size_of(Str8));
+			mem_copy(chunk_entry + size_of(Str8), id_addr, size_of(Str8));
+			chunk_entry += size_of(A2_Str8);
+			mem_copy(chunk_entry, u8_(& key_size), size_of(Str8));
+			mem_copy(chunk_entry + size_of(Str8), str_chunk_len_addr, size_of(Str8));
+			chunk_entry += size_of(A2_Str8);
+			mem_copy(chunk_entry, u8_(& key_chunk), size_of(Str8));
+			mem_copy(chunk_entry + size_of(Str8), chunk_str_addr, size_of(Str8));
+
+			uvar(Slice_Mem, chunk_slice) = {0};
+			U8 chunk_slice_addr = u8_(chunk_slice);
+			u8_r(chunk_slice_addr + Slice_ptr)[0] = chunk_entries;
+			u8_r(chunk_slice_addr + Slice_len)[0] = 3;
+
+			str8gen__append_fmt__u(gen_addr, u8_(& chunk_fmt), chunk_slice_addr);
 		}
 
 		farena_reset__u(sarena);
 	}
 
-	u8_r(result + Str8_ptr)[0] = u8_r(u8_(gen) + Str8Gen_ptr)[0];
-	u8_r(result + Str8_len)[0] = u8_r(u8_(gen) + Str8Gen_len)[0];
+	u8_r(result + Str8_ptr)[0] = u8_r(gen_addr + Str8Gen_ptr)[0];
+	u8_r(result + Str8_len)[0] = u8_r(gen_addr + Str8Gen_len)[0];
 }
 I_ Str8 watl_dump_listing(AllocatorInfo buffer, Slice_WATL_Line lines) {
 	Str8 out = {0};
