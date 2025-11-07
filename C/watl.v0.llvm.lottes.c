@@ -1006,6 +1006,7 @@ S_ void farena_allocator_proc(U8 arena, U8 requested_size, U8 alignment, U8 old_
 #define MS_ANYSIZE_ARRAY           1
 #define MS_MEM_COMMIT              0x00001000
 #define MS_MEM_RESERVE             0x00002000
+#define MS_MEM_RELEASE             0x00002000
 #define MS_MEM_LARGE_PAGES         0x20000000
 #define MS_PAGE_READWRITE          0x04
 #define MS_TOKEN_ADJUST_PRIVILEGES (0x0020)
@@ -1082,7 +1083,7 @@ I_ B4   os_vmem_commit__u (U8 vm, U8 size, B4 no_large_pages) {
 	// if (no_large_pages == false ) { return 1; }
 	return ms_virtual_alloc(cast(MS_LPVOID, vm), size, MS_MEM_COMMIT, MS_PAGE_READWRITE) != null; 
 }
-I_ void os_vmem_release__u(U8 vm, U8 size) { ms_virtual_free(cast(MS_LPVOID, vm), 0, MS_MEM_RESERVE); }
+I_ void os_vmem_release__u(U8 vm, U8 size) { ms_virtual_free(cast(MS_LPVOID, vm), 0, MS_MEM_RELEASE); }
 
 I_ U8   os__vmem_reserve( U8 size, Opts_vmem_R opts) { 
 	assert(opts != nullptr);
@@ -1109,7 +1110,7 @@ S_ inline U8 varena__make__u(U8 reserve_size, U8 commit_size, U4 flags, U8 base_
 	B4 ok         = os_vmem_commit__u(base, commit_sz, no_large);	       assert(ok   != 0);
 	U8 header     = varena_header_size();
 	U8 data_start = base + header;
-	u8_r(base + VArena_reserve_start)[0] = data_start;
+	u8_r(base + VArena_reserve_start)[0] = base;
 	u8_r(base + VArena_reserve      )[0] = reserve_sz;
 	u8_r(base + VArena_commit_size  )[0] = commit_sz;
 	u8_r(base + VArena_committed    )[0] = commit_sz;
@@ -1121,7 +1122,7 @@ S_ inline void varena__push__u(U8 vm, U8 amount, U8 type_width, U8 alignment, U8
 	assert(result != null);
 	assert(vm  != null);
 	if (amount == 0) { slice_clear(result); return; }
-	alignment = alignment == 0 ? alignment : MEMORY_ALIGNMENT_DEFAULT;
+	alignment = alignment ? alignment : MEMORY_ALIGNMENT_DEFAULT;
 	U8   requested_size = amount * type_width;
 	U8   aligned_size   = align_pow2(requested_size, alignment);
 	U8_R commit_used    = u8_r(vm + VArena_commit_used);

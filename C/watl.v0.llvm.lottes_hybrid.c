@@ -1005,6 +1005,7 @@ void farena_allocator_proc(AllocatorProc_In in, AllocatorProc_Out*R_ out)
 #define MS_ANYSIZE_ARRAY                   1
 #define MS_MEM_COMMIT                      0x00001000
 #define MS_MEM_RESERVE                     0x00002000
+#define MS_MEM_RELEASE                     0x00008000
 #define MS_MEM_LARGE_PAGES                 0x20000000
 #define MS_PAGE_READWRITE                  0x04
 #define MS_TOKEN_ADJUST_PRIVILEGES         (0x0020)
@@ -1091,7 +1092,7 @@ finline B4 os__vmem_commit(U8 vm, U8 size, Opts_vmem*R_ opts) {
 	B4 result = (VirtualAlloc(cast(MS_LPVOID, vm), size, MS_MEM_COMMIT, MS_PAGE_READWRITE) != 0);
 	return result;
 }
-internal inline void  os_vmem_release(U8 vm, U8 size) { VirtualFree(cast(MS_LPVOID, vm), 0, MS_MEM_RESERVE); }
+internal inline void  os_vmem_release(U8 vm, U8 size) { VirtualFree(cast(MS_LPVOID, vm), 0, MS_MEM_RELEASE); }
 #pragma endregion OS
 
 #pragma region VArena (Virutal Address Space Arena)
