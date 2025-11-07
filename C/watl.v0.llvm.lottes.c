@@ -1488,7 +1488,7 @@ I_ U8 kt1cx_slot_id__u(U8 kt, U8 key) {
 S_ inline U8 kt1cx_get__u(U8 kt, U8 key, U8 m) {
 	U8 hash_index  = kt1cx_slot_id__u(kt, key);
 	U8 cell_offset = hash_index * u8_r(m + KT1CX_ByteMeta_cell_size)[0];
-	U8 cell_cursor = u8_r(kt + cell_offset);
+	U8 cell_cursor = kt + cell_offset;
 	{
 		U8 slot_size   = u8_r(m + KT1CX_ByteMeta_slot_size)[0];
 		U8 slot_cursor = cell_cursor;
@@ -1499,7 +1499,7 @@ S_ inline U8 kt1cx_get__u(U8 kt, U8 key, U8 m) {
 				return slot_cursor;
 			}
 		}
-		U8 cell_next = u8_r(cell_cursor + u8_r(m + KT1CX_ByteMeta_cell_next_offset)[0]);
+		U8 cell_next = cell_cursor + u8_r(m + KT1CX_ByteMeta_cell_next_offset)[0];
 		if (cell_next != null) {
 			slot_cursor = cell_next;
 			cell_cursor = cell_next;
