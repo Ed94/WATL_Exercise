@@ -184,11 +184,6 @@ I_ void pause(void){__asm__ volatile("pause":::"memory");}
 typedef unsigned char def_tset(UTF8);
 typedef def_struct(Str8)       { U8 ptr; U8 len; }; typedef Str8 def_tset(Slice_UTF8);
 typedef def_struct(Slice_Str8) { U8 ptr; U8 len; };
-#define def_field_str8(member) def_field(Str8,member)
-enum {
-	def_field_str8(ptr),
-	def_field_str8(len),
-};
 #define lit(string_literal)    (Str8){ u8_(string_literal), size_of(string_literal) - 1 }
 #pragma endregion Strings
 
@@ -316,15 +311,13 @@ I_ void slice_clear(U8 base) {
 	u8_r(base + Slice_len)[0] = 0;
 }
 
-#define span_iter(type, iter, m_begin, op, m_end) \
-(                                   \
+#define span_iter(type, iter, m_begin, op, m_end) ( \
 	tmpl(Iter_Span,type) iter = {     \
 		.r      = {(m_begin), (m_end)}, \
 		.cursor = (m_begin) };          \
 	iter.cursor op iter.r.end;        \
 	++ iter.cursor                    \
 )
-
 #define def_span(type)                                                \
 	        def_struct(tmpl(     Span,type)) { type begin; type end; }; \
 	typedef def_struct(tmpl(Iter_Span,type)) { tmpl(Span,type) r; type cursor; }
@@ -1452,13 +1445,11 @@ I_ VArena* varena__make(Opts_varena_make*R_ opts) {
 	return cast(VArena*, varena__make__u(opts->reserve_size, opts->commit_size, opts->flags, opts->base_addr));
 }
 I_ Slice_Mem varena__push(VArena_R vm, U8 amount, U8 type_width, Opts_varena* opts) {
-	Slice_Mem result;
-	varena__push__u(u8_(vm), amount, type_width, opts ? opts->alignment : 0, u8_(& result));
+	Slice_Mem result; varena__push__u(u8_(vm), amount, type_width, opts ? opts->alignment : 0, u8_(& result)); 
 	return result;
 }
 I_ Slice_Mem varena__shrink(VArena_R vm, Slice_Mem old_allocation, U8 requested_size, Opts_varena* opts) {
-	Slice_Mem result;
-	varena__shrink__u(u8_(& result), u8_(vm), old_allocation.ptr, old_allocation.len, requested_size, opts ? opts->alignment : 0);
+	Slice_Mem result; varena__shrink__u(u8_(& result), u8_(vm), old_allocation.ptr, old_allocation.len, requested_size, opts ? opts->alignment : 0);
 	return result;
 }
 
@@ -1683,8 +1674,7 @@ I_ Arena* arena__make(Opts_arena_make*R_ opts) {
 S_ Slice_Mem arena__push(Arena_R arena, U8 amount, U8 type_width, Opts_arena*R_ opts) {
 	assert(arena != nullptr);
 	assert(opts  != nullptr);
-	Slice_Mem result = {0};
-	arena__push__u(u8_(arena), amount, type_width, opts->alignment, u8_(& result));
+	Slice_Mem result = {0}; arena__push__u(u8_(arena), amount, type_width, opts->alignment, u8_(& result));
 	return result;
 }
 I_ void arena_release(Arena_R arena) {
@@ -1701,8 +1691,7 @@ S_ void arena_rewind(Arena_R arena, AllocatorSP save_point) {
 }
 I_ AllocatorSP arena_save(Arena_R arena) {
 	assert(arena != nullptr);
-	AllocatorSP sp;
-	arena_save__u(u8_(arena), u8_(& sp));
+	AllocatorSP sp; arena_save__u(u8_(arena), u8_(& sp));
 	return sp;
 }
 #pragma endregion Arena
@@ -1713,16 +1702,16 @@ I_ void ktl_populate_slice_a2_str8(U8 kt, U8 backing_ptr, U8 backing_len, U8 val
 	U8 values_len = u8_r(values + Slice_len)[0];
 	if (values_len == 0) { return; }
 	mem__alloc__u(kt, backing_ptr, backing_len, size_of(KTL_Slot_Str8) * values_len, 0, false);
-	U8 slots_ptr  = u8_r(kt + Slice_ptr)[0];
+	U8 slots_ptr  = u8_r(kt     + Slice_ptr)[0];
 	U8 values_ptr = u8_r(values + Slice_ptr)[0];
 	for (U8 id = 0; id < values_len; ++id) {
-		U8 kt_slot = slots_ptr  + id * size_of(KTL_Slot_Str8);
-		U8 pair    = values_ptr + id * size_of(A2_Str8);
+		U8 kt_slot   = slots_ptr  + id * size_of(KTL_Slot_Str8);
+		U8 pair      = values_ptr + id * size_of(A2_Str8);
 		U8 key_str   = pair;
 		U8 value_str = pair + size_of(Str8);
 		mem_copy(kt_slot + KTL_Slot_value, value_str, size_of(Str8));
-		U8 key_ptr = u8_r(key_str + Str8_ptr)[0];
-		U8 key_len = u8_r(key_str + Str8_len)[0];
+		U8 key_ptr = u8_r(key_str + Slice_ptr)[0];
+		U8 key_len = u8_r(key_str + Slice_len)[0];
 		hash64_fnv1a__u(kt_slot + KTL_Slot_key, key_ptr, key_len, 0);
 	}
 }
@@ -1802,17 +1791,14 @@ S_ inline U8 kt1cx_set__u(U8 kt, U8 key, U8 v_ptr, U8 v_len, U8 backing_cells, U
 	U8 table_len = u8_r(kt + Slice_len)[0];
 	U8 table_ptr = u8_r(kt + Slice_ptr)[0];
 	if (table_len == 0 || table_ptr == 0) { return null; }
-
 	U8 cell_size        = u8_r(m + KT1CX_ByteMeta_cell_size)[0];
 	U8 cell_depth       = u8_r(m + KT1CX_ByteMeta_cell_depth)[0];
 	U8 slot_size        = u8_r(m + KT1CX_ByteMeta_slot_size)[0];
 	U8 slot_key_offset  = u8_r(m + KT1CX_ByteMeta_slot_key_offset)[0];
 	U8 cell_next_offset = u8_r(m + KT1CX_ByteMeta_cell_next_offset)[0];
 	U8 slot_span        = cell_depth * slot_size;
-
-	U8 cell_cursor = table_ptr + hash_index * cell_size;
-
-process_cell:
+	U8 cell_cursor      = table_ptr + hash_index * cell_size;
+	process_cell:
 	{
 		U8 slot_cursor = cell_cursor;
 		U8 slots_end   = cell_cursor + slot_span;
@@ -1829,7 +1815,6 @@ process_cell:
 				return slot_cursor;
 			}
 		}
-
 		U8 next_addr = cell_cursor + cell_next_offset;
 		U8 next_cell = u8_r(next_addr)[0];
 		if (next_cell != null) {
@@ -1837,7 +1822,6 @@ process_cell:
 			cell_cursor = next_cell;
 			goto process_slots;
 		}
-
 		uvar(Slice_Mem, new_cell);
 		mem__alloc__u(
 			u8_(new_cell),
@@ -1860,16 +1844,10 @@ I_ void kt1cx_init(KT1CX_Info info, KT1CX_InfoMeta meta, KT1CX_Byte*R_ result) {
 	assert(result != nullptr);
 	kt1cx_init__u(u8_(& info.backing_table), u8_(& info.backing_cells), u8_(& meta), u8_(& result->table));
 }
-I_ void kt1cx_clear(KT1CX_Byte kt, KT1CX_ByteMeta meta) {
-	kt1cx_clear__u(u8_(& kt.table), u8_(& meta));
-}
-I_ U8 kt1cx_slot_id(KT1CX_Byte kt, U8 key, KT1CX_ByteMeta meta) {
-	return kt1cx_slot_id__u(u8_(& kt.table), key);
-}
-I_ U8 kt1cx_get(KT1CX_Byte kt, U8 key, KT1CX_ByteMeta meta) {
-	return kt1cx_get__u(u8_(& kt.table), key, u8_(& meta));
-}
-I_ U8 kt1cx_set(KT1CX_Byte kt, U8 key, Slice_Mem value, AllocatorInfo backing_cells, KT1CX_ByteMeta meta) {
+I_ void kt1cx_clear (KT1CX_Byte kt,         KT1CX_ByteMeta meta) {        kt1cx_clear__u  (u8_(& kt.table),      u8_(& meta)); }
+I_ U8  kt1cx_slot_id(KT1CX_Byte kt, U8 key, KT1CX_ByteMeta meta) { return kt1cx_slot_id__u(u8_(& kt.table), key             ); }
+I_ U8  kt1cx_get    (KT1CX_Byte kt, U8 key, KT1CX_ByteMeta meta) { return kt1cx_get__u    (u8_(& kt.table), key, u8_(& meta)); }
+I_ U8  kt1cx_set    (KT1CX_Byte kt, U8 key, Slice_Mem value, AllocatorInfo backing_cells, KT1CX_ByteMeta meta) {
 	return kt1cx_set__u(u8_(& kt.table), key, value.ptr, value.len, u8_(& backing_cells), u8_(& meta));
 }
 #pragma endregion Key Table
@@ -1878,14 +1856,13 @@ I_ U8 kt1cx_set(KT1CX_Byte kt, U8 key, Slice_Mem value, AllocatorInfo backing_ce
 I_ B4 char_is_upper(U1 c) { return ('A' <= c && c <= 'Z'); }
 I_ U1 char_to_lower(U1 c) { if (char_is_upper(c)) { c += ('a' - 'A'); } return c; }
 I_ U1 integer_symbols(U1 value) {
-	LP_ U1 lookup_table[16] = { '0','1','2','3','4','5','6','7','8','9','A','B','C','D','E','F' };
-	return lookup_table[value & 0xF];
+	LP_ U1 lookup_table[16] = { '0','1','2','3','4','5','6','7','8','9','A','B','C','D','E','F' }; return lookup_table[value & 0xF];
 }
 S_ U8 str8_to_cstr_capped__u(U8 str_slice, U8 mem_slice) {
 	assert(str_slice != null);
 	assert(mem_slice != null);
-	U8 src_ptr = u8_r(str_slice + Str8_ptr)[0];
-	U8 src_len = u8_r(str_slice + Str8_len)[0];
+	U8 src_ptr = u8_r(str_slice + Slice_ptr)[0];
+	U8 src_len = u8_r(str_slice + Slice_len)[0];
 	U8 dst_ptr = u8_r(mem_slice + Slice_ptr)[0];
 	U8 dst_len = u8_r(mem_slice + Slice_len)[0];
 	assert(dst_ptr != null);
@@ -1896,9 +1873,7 @@ S_ U8 str8_to_cstr_capped__u(U8 str_slice, U8 mem_slice) {
 	u1_r(dst_ptr)[copy_len] = 0;
 	return dst_ptr;
 }
-I_ char* str8_to_cstr_capped(Str8 content, Slice_Mem mem) {
-	return cast(char*, str8_to_cstr_capped__u(u8_(& content), u8_(& mem)));
-}
+I_ char* str8_to_cstr_capped(Str8 content, Slice_Mem mem) { return cast(char*, str8_to_cstr_capped__u(u8_(& content), u8_(& mem))); }
 S_ void str8_from_u32__u(U8 result, U8 ainfo_proc, U8 ainfo_data, U4 num, U4 radix, U4 min_digits, U4 digit_group_separator) {
 	assert(result     != null);
 	assert(ainfo_proc != null);
@@ -1927,8 +1902,8 @@ S_ void str8_from_u32__u(U8 result, U8 ainfo_proc, U8 ainfo_data, U4 num, U4 rad
 	mem__alloc__u(u8_(allocation), ainfo_proc, ainfo_data, total_len, 0, 1);
 	U8 out_ptr = u8_r(u8_(allocation) + Slice_ptr)[0];
 	assert(out_ptr != null);
-	u8_r(result + Str8_ptr)[0] = out_ptr;
-	u8_r(result + Str8_len)[0] = total_len;
+	u8_r(result + Slice_ptr)[0] = out_ptr;
+	u8_r(result + Slice_len)[0] = total_len;
 
 	U8 digits_until_separator = digit_group_size;
 	U4 num_reduce = num;
@@ -1953,8 +1928,7 @@ S_ void str8_from_u32__u(U8 result, U8 ainfo_proc, U8 ainfo_data, U4 num, U4 rad
 	}
 }
 I_ Str8 str8_from_u32(AllocatorInfo ainfo, U4 num, U4 radix, U4 min_digits, U4 digit_group_separator) {
-	Str8 out = {0};
-	str8_from_u32__u(u8_(& out), u8_(ainfo.proc), ainfo.data, num, radix, min_digits, digit_group_separator);
+	Str8 out = {0}; str8_from_u32__u(u8_(& out), u8_(ainfo.proc), ainfo.data, num, radix, min_digits, digit_group_separator);
 	return out;
 }
 S_ void str8__fmt_ktl__u(U8 result, U8 ainfo_proc, U8 ainfo_data, U8 buffer_slice, U8 table_slice, U8 fmt_slice) {
@@ -1962,20 +1936,16 @@ S_ void str8__fmt_ktl__u(U8 result, U8 ainfo_proc, U8 ainfo_data, U8 buffer_slic
 	assert(buffer_slice != null);
 	assert(table_slice  != null);
 	assert(fmt_slice    != null);
-
 	U8 buffer_ptr = u8_r(buffer_slice + Slice_ptr)[0];
 	U8 buffer_len = u8_r(buffer_slice + Slice_len)[0];
 	assert(buffer_ptr != null);
 	assert(buffer_len  != 0);
-
 	U8 table_ptr = u8_r(table_slice + Slice_ptr)[0];
 	U8 table_len = u8_r(table_slice + Slice_len)[0];
 	assert(table_ptr != null);
-
-	U8 fmt_ptr = u8_r(fmt_slice + Str8_ptr)[0];
-	U8 fmt_len = u8_r(fmt_slice + Str8_len)[0];
+	U8 fmt_ptr = u8_r(fmt_slice + Slice_ptr)[0];
+	U8 fmt_len = u8_r(fmt_slice + Slice_len)[0];
 	assert(fmt_ptr != null);
-
 	if (ainfo_proc != null) {
 		LP_ B1 query_mem[size_of(AllocatorQueryInfo)] = {0};
 		U8   query_addr = u8_(query_mem);
@@ -1983,7 +1953,6 @@ S_ void str8__fmt_ktl__u(U8 result, U8 ainfo_proc, U8 ainfo_data, U8 buffer_slic
 		U4   features   = u4_r(query_addr + AllocatorQueryInfo_features)[0];
 		assert((features & AllocatorQuery_Grow) != 0);
 	}
-
 	U8 cursor_buffer    = buffer_ptr;
 	U8 buffer_remaining = buffer_len;
 	U8 cursor_fmt       = fmt_ptr;
@@ -2024,8 +1993,8 @@ S_ void str8__fmt_ktl__u(U8 result, U8 ainfo_proc, U8 ainfo_data, U8 buffer_slic
 			for (U8 slot_index = 0; slot_index < table_len; ++slot_index, slot_cursor += slot_size) {
 				if (u8_r(slot_cursor + KTL_Slot_key)[0] == key) {
 					U8 value_slice = slot_cursor + KTL_Slot_value;
-					value_ptr = u8_r(value_slice + Str8_ptr)[0];
-					value_len = u8_r(value_slice + Str8_len)[0];
+					value_ptr = u8_r(value_slice + Slice_ptr)[0];
+					value_len = u8_r(value_slice + Slice_len)[0];
 					break;
 				}
 			}
@@ -2034,11 +2003,11 @@ S_ void str8__fmt_ktl__u(U8 result, U8 ainfo_proc, U8 ainfo_data, U8 buffer_slic
 				if (ainfo_proc != null && (buffer_remaining - token_len) <= 0) {
 					uvar(Slice_Mem, grown);
 					mem__grow__u(u8_(grown), ainfo_proc, ainfo_data, buffer_ptr, buffer_len, buffer_len + token_len, 0, false, true);
-					U8 grown_ptr = u8_r(u8_(grown) + Slice_ptr)[0];
-					U8 grown_len = u8_r(u8_(grown) + Slice_len)[0];
-					U8 used      = cursor_buffer - buffer_ptr;
-					buffer_ptr   = grown_ptr;
-					buffer_len   = grown_len;
+					U8 grown_ptr     = u8_r(u8_(grown) + Slice_ptr)[0];
+					U8 grown_len     = u8_r(u8_(grown) + Slice_len)[0];
+					U8 used          = cursor_buffer - buffer_ptr;
+					buffer_ptr       = grown_ptr;
+					buffer_len       = grown_len;
 					cursor_buffer    = buffer_ptr + used;
 					buffer_remaining = buffer_len - used;
 					u8_r(buffer_slice + Slice_ptr)[0] = buffer_ptr;
@@ -2061,11 +2030,10 @@ S_ void str8__fmt_ktl__u(U8 result, U8 ainfo_proc, U8 ainfo_data, U8 buffer_slic
 			continue;
 		}
 	}
-
 	u8_r(buffer_slice + Slice_ptr)[0] = buffer_ptr;
 	u8_r(buffer_slice + Slice_len)[0] = buffer_len;
-	u8_r(result + Str8_ptr)[0] = buffer_ptr;
-	u8_r(result + Str8_len)[0] = buffer_len - buffer_remaining;
+	u8_r(result + Slice_ptr)[0] = buffer_ptr;
+	u8_r(result + Slice_len)[0] = buffer_len - buffer_remaining;
 }
 I_ Str8 str8__fmt_ktl(AllocatorInfo ainfo, Slice_Mem*R_ buffer, KTL_Str8 table, Str8 fmt_template) {
 	assert(buffer != nullptr);
@@ -2121,60 +2089,53 @@ S_ void str8__fmt__u(U8 result, U8 fmt_slice, U8 entries_slice) {
 	str8__fmt_ktl__u(result, 0, 0, buffer_addr, kt_addr, fmt_slice);
 }
 I_ Str8 str8__fmt(Str8 fmt_template, Slice_A2_Str8*R_ entries) {
-	Str8 output = {0};
-	str8__fmt__u(u8_(& output), u8_(& fmt_template), u8_(entries));
-	return output;
+	Str8 output = {0}; str8__fmt__u(u8_(& output), u8_(& fmt_template), u8_(entries)); return output;
 }
 S_ void str8cache__fill_byte_meta__u(U8 meta) {
 	assert(meta != null);
-	u8_r(meta + KT1CX_ByteMeta_slot_size)[0]        = size_of(KT1CX_Slot_Str8);
-	u8_r(meta + KT1CX_ByteMeta_slot_key_offset)[0]  = offset_of(KT1CX_Slot_Str8, key);
+	u8_r(meta + KT1CX_ByteMeta_slot_size       )[0] = size_of(KT1CX_Slot_Str8);
+	u8_r(meta + KT1CX_ByteMeta_slot_key_offset )[0] = offset_of(KT1CX_Slot_Str8, key);
 	u8_r(meta + KT1CX_ByteMeta_cell_next_offset)[0] = offset_of(KT1CX_Cell_Str8, next);
-	u8_r(meta + KT1CX_ByteMeta_cell_depth)[0]       = Str8Cache_CELL_DEPTH;
-	u8_r(meta + KT1CX_ByteMeta_cell_size)[0]        = size_of(KT1CX_Cell_Str8);
-	u8_r(meta + KT1CX_ByteMeta_type_width)[0]       = size_of(Str8);
+	u8_r(meta + KT1CX_ByteMeta_cell_depth      )[0] = Str8Cache_CELL_DEPTH;
+	u8_r(meta + KT1CX_ByteMeta_cell_size       )[0] = size_of(KT1CX_Cell_Str8);
+	u8_r(meta + KT1CX_ByteMeta_type_width      )[0] = size_of(Str8);
 	Str8 type_name = lit(stringify(Str8));
-	u8_r(meta + KT1CX_ByteMeta_type_name + Str8_ptr)[0] = type_name.ptr;
-	u8_r(meta + KT1CX_ByteMeta_type_name + Str8_len)[0] = type_name.len;
+	u8_r(meta + KT1CX_ByteMeta_type_name + Slice_ptr)[0] = type_name.ptr;
+	u8_r(meta + KT1CX_ByteMeta_type_name + Slice_len)[0] = type_name.len;
 }
 S_ void str8cache__fill_info_meta__u(U8 meta, U8 cell_pool_size, U8 table_size) {
 	assert(meta != null);
-	u8_r(meta + KT1CX_InfoMeta_cell_pool_size)[0] = cell_pool_size;
-	u8_r(meta + KT1CX_InfoMeta_table_size)[0]     = table_size;
-	u8_r(meta + KT1CX_InfoMeta_slot_size)[0]        = size_of(KT1CX_Slot_Str8);
-	u8_r(meta + KT1CX_InfoMeta_slot_key_offset)[0]  = offset_of(KT1CX_Slot_Str8, key);
+	u8_r(meta + KT1CX_InfoMeta_cell_pool_size  )[0] = cell_pool_size;
+	u8_r(meta + KT1CX_InfoMeta_table_size      )[0] = table_size;
+	u8_r(meta + KT1CX_InfoMeta_slot_size       )[0] = size_of(KT1CX_Slot_Str8);
+	u8_r(meta + KT1CX_InfoMeta_slot_key_offset )[0] = offset_of(KT1CX_Slot_Str8, key);
 	u8_r(meta + KT1CX_InfoMeta_cell_next_offset)[0] = offset_of(KT1CX_Cell_Str8, next);
-	u8_r(meta + KT1CX_InfoMeta_cell_depth)[0]       = Str8Cache_CELL_DEPTH;
-	u8_r(meta + KT1CX_InfoMeta_cell_size)[0]        = size_of(KT1CX_Cell_Str8);
-	u8_r(meta + KT1CX_InfoMeta_type_width)[0]       = size_of(Str8);
+	u8_r(meta + KT1CX_InfoMeta_cell_depth      )[0] = Str8Cache_CELL_DEPTH;
+	u8_r(meta + KT1CX_InfoMeta_cell_size       )[0] = size_of(KT1CX_Cell_Str8);
+	u8_r(meta + KT1CX_InfoMeta_type_width      )[0] = size_of(Str8);
 	Str8 type_name = lit(stringify(Str8));
-	u8_r(meta + KT1CX_InfoMeta_type_name + Str8_ptr)[0] = type_name.ptr;
-	u8_r(meta + KT1CX_InfoMeta_type_name + Str8_len)[0] = type_name.len;
+	u8_r(meta + KT1CX_InfoMeta_type_name + Slice_ptr)[0] = type_name.ptr;
+	u8_r(meta + KT1CX_InfoMeta_type_name + Slice_len)[0] = type_name.len;
 }
 S_ void str8cache__init__u(U8 cache, U8 opts) {
 	assert(cache != null);
 	assert(opts  != null);
-	U8 str_reserve = cache + Str8Cache_str_reserve;
+	U8 str_reserve  = cache + Str8Cache_str_reserve;
 	U8 cell_reserve = cache + Str8Cache_cell_reserve;
 	U8 tbl_backing  = cache + Str8Cache_tbl_backing;
-	
 	U8 in_str_reserve  = opts + Opts_str8cache_init_str_reserve;
 	U8 in_cell_reserve = opts + Opts_str8cache_init_cell_reserve;
 	U8 in_tbl_backing  = opts + Opts_str8cache_init_tbl_backing;
-
 	assert(u8_r(in_str_reserve  + AllocatorInfo_proc)[0] != null);
 	assert(u8_r(in_cell_reserve + AllocatorInfo_proc)[0] != null);
 	assert(u8_r(in_tbl_backing  + AllocatorInfo_proc)[0] != null);
-
 	mem_copy(str_reserve,  in_str_reserve,  size_of(AllocatorInfo));
 	mem_copy(cell_reserve, in_cell_reserve, size_of(AllocatorInfo));
 	mem_copy(tbl_backing,  in_tbl_backing,  size_of(AllocatorInfo));
-
 	U8 cell_pool_size = u8_r(opts + Opts_str8cache_init_cell_pool_size)[0];
 	U8 table_size     = u8_r(opts + Opts_str8cache_init_table_size)[0];
 	if (cell_pool_size == 0) { cell_pool_size = kilo(1); }
 	if (table_size     == 0) { table_size     = kilo(1); }
-
 	uvar(KT1CX_InfoMeta, meta) = {0};
 	str8cache__fill_info_meta__u(u8_(meta), cell_pool_size, table_size);
 	kt1cx_init__u(tbl_backing, cell_reserve, u8_(meta), cache + Str8Cache_kt + KT1CX_Str8_table);
@@ -2201,16 +2162,16 @@ S_ U8 str8cache_get__u(U8 kt, U8 key) {
 }
 S_ U8 str8cache_set__u(U8 kt, U8 key, U8 value_str, U8 str_reserve, U8 backing_cells) {
 	assert(value_str != null);
-	U8 value_ptr = u8_r(value_str + Str8_ptr)[0];
-	U8 value_len = u8_r(value_str + Str8_len)[0];
+	U8 value_ptr = u8_r(value_str + Slice_ptr)[0];
+	U8 value_len = u8_r(value_str + Slice_len)[0];
 	assert(value_ptr != null);
 	uvar(KT1CX_ByteMeta, meta) = {0};
 	str8cache__fill_byte_meta__u(u8_(meta));
 	U8 entry = kt1cx_set__u(kt, key, value_ptr, value_len, backing_cells, u8_(meta));
 	if (entry == null) { return null; }
 	U8 stored      = entry + KT1CX_Slot_Str8_value;
-	U8 stored_ptr  = u8_r(stored + Str8_ptr)[0];
-	U8 stored_len  = u8_r(stored + Str8_len)[0];
+	U8 stored_ptr  = u8_r(stored + Slice_ptr)[0];
+	U8 stored_len  = u8_r(stored + Slice_len)[0];
 	U8 reserve_proc = u8_r(str_reserve + AllocatorInfo_proc)[0];
 	U8 reserve_data = u8_r(str_reserve + AllocatorInfo_data)[0];
 	assert(reserve_proc != null);
@@ -2219,11 +2180,11 @@ S_ U8 str8cache_set__u(U8 kt, U8 key, U8 value_str, U8 str_reserve, U8 backing_c
 		mem__alloc__u(u8_(allocation), reserve_proc, reserve_data, value_len, 0, 1);
 		stored_ptr = u8_r(u8_(allocation) + Slice_ptr)[0];
 		stored_len = u8_r(u8_(allocation) + Slice_len)[0];
-		u8_r(stored + Str8_ptr)[0] = stored_ptr;
-		u8_r(stored + Str8_len)[0] = stored_len;
+		u8_r(stored + Slice_ptr)[0] = stored_ptr;
+		u8_r(stored + Slice_len)[0] = stored_len;
 	}
 	mem_copy(stored_ptr, value_ptr, value_len);
-	u8_r(stored + Str8_len)[0] = value_len;
+	u8_r(stored + Slice_len)[0] = value_len;
 	return stored;
 }
 S_ void cache_str8__u(U8 result, U8 cache, U8 str) {
@@ -2231,8 +2192,8 @@ S_ void cache_str8__u(U8 result, U8 cache, U8 str) {
 	assert(cache  != null);
 	assert(str    != null);
 	U8 hash = 0;
-	U8 str_ptr = u8_r(str + Str8_ptr)[0];
-	U8 str_len = u8_r(str + Str8_len)[0];
+	U8 str_ptr = u8_r(str + Slice_ptr)[0];
+	U8 str_len = u8_r(str + Slice_len)[0];
 	hash64_fnv1a__u(u8_(& hash), str_ptr, str_len, 0);
 	U8 entry = str8cache_set__u(
 		cache + Str8Cache_kt + KT1CX_Str8_table,
@@ -2242,12 +2203,12 @@ S_ void cache_str8__u(U8 result, U8 cache, U8 str) {
 		cache + Str8Cache_cell_reserve
 	);
 	if (entry == null) {
-		u8_r(result + Str8_ptr)[0] = 0;
-		u8_r(result + Str8_len)[0] = 0;
+		u8_r(result + Slice_ptr)[0] = 0;
+		u8_r(result + Slice_len)[0] = 0;
 		return;
 	}
-	u8_r(result + Str8_ptr)[0] = u8_r(entry + Str8_ptr)[0];
-	u8_r(result + Str8_len)[0] = u8_r(entry + Str8_len)[0];
+	u8_r(result + Slice_ptr)[0] = u8_r(entry + Slice_ptr)[0];
+	u8_r(result + Slice_len)[0] = u8_r(entry + Slice_len)[0];
 }
 I_ void str8cache_clear(KT1CX_Str8 kt) {
 	kt1cx_assert(kt);
@@ -2273,11 +2234,9 @@ I_ Str8* str8cache_set(KT1CX_Str8 kt, U8 key, Str8 value, AllocatorInfo str_rese
 	return cast(Str8*, entry);
 }
 I_ Str8 cache_str8(Str8Cache_R cache, Str8 str) {
-	Str8 result = {0};
 	assert(cache != nullptr);
 	slice_assert(str);
-	cache_str8__u(u8_(& result), u8_(cache), u8_(& str));
-	return result;
+	Str8 result = {0}; cache_str8__u(u8_(& result), u8_(cache), u8_(& str)); return result;
 }
 S_ void str8gen_init__u(U8 gen, U8 backing) {
 	assert(gen     != null);
@@ -2301,8 +2260,8 @@ I_ Str8 str8_from_str8gen(Str8Gen gen) { return (Str8){ u8_(gen.ptr), gen.len };
 S_ void str8gen_append_str8__u(U8 gen, U8 str_slice) {
 	assert(gen       != null);
 	assert(str_slice != null);
-	U8 str_ptr = u8_r(str_slice + Str8_ptr)[0];
-	U8 str_len = u8_r(str_slice + Str8_len)[0];
+	U8 str_ptr = u8_r(str_slice + Slice_ptr)[0];
+	U8 str_len = u8_r(str_slice + Slice_len)[0];
 	U8 gen_ptr = u8_r(gen + Str8Gen_ptr)[0];
 	U8 gen_len = u8_r(gen + Str8Gen_len)[0];
 	U8 gen_cap = u8_r(gen + Str8Gen_cap)[0];
@@ -2325,17 +2284,13 @@ I_ void str8gen_append_str8(Str8Gen_R gen, Str8 str) {
 	str8gen_append_str8__u(u8_(gen), u8_(& str));
 }
 S_ void str8gen__append_fmt__u(U8 gen, U8 fmt_slice, U8 entries_slice) {
-	assert(gen != null);
-	assert(fmt_slice != null);
+	assert(gen           != null);
+	assert(fmt_slice     != null);
 	assert(entries_slice != null);
-	uvar(Str8, formatted) = {0};
-	U8 formatted_addr = u8_(formatted);
-	str8__fmt__u(formatted_addr, fmt_slice, entries_slice);
-	str8gen_append_str8__u(gen, formatted_addr);
+	uvar(Str8, formatted) = {0}; str8__fmt__u(u8_(formatted), fmt_slice, entries_slice);
+	str8gen_append_str8__u(gen, u8_(formatted));
 }
-I_ void str8gen__append_fmt(Str8Gen_R gen, Str8 fmt_template, Slice_A2_Str8*R_ entries) {
-	str8gen__append_fmt__u(u8_(gen), u8_(& fmt_template), u8_(entries));
-}
+I_ void str8gen__append_fmt(Str8Gen_R gen, Str8 fmt_template, Slice_A2_Str8*R_ entries) {  str8gen__append_fmt__u(u8_(gen), u8_(& fmt_template), u8_(entries)); }
 #pragma endregion String Operations
 
 #pragma region File System
@@ -2371,12 +2326,11 @@ W_ MS_BOOL  ms_get_file_size_ex(MS_HANDLE hFile, MS_LARGE_INTEGER* lpFileSize) _
 W_ MS_DWORD ms_get_last_error(void) __asm__("GetLastError");
 
 S_ void file_read_contents__u(U8 path_ptr, U8 path_len, U8 backing_proc, U8 backing_data, B4 zero_backing, U8 result) {
-	assert(result != null);
+	assert(result != null); 
 	slice_clear(result + FileOpInfo_content);
 	assert(backing_proc != null);
 	if (path_ptr == null || path_len == 0) {
-		assert(false && "Invalid path");
-		return;
+		assert(false && "Invalid path"); return;
 	}
 
 	LP_ B1 scratch[FILE_PATH_SCRATCH_CAP];
@@ -2397,15 +2351,13 @@ S_ void file_read_contents__u(U8 path_ptr, U8 path_len, U8 backing_proc, U8 back
 		null
 	);
 	if (id_file == MS_INVALID_HANDLE_VALUE) {
-		MS_DWORD error_code = ms_get_last_error();
-		assert(error_code != 0);
+		MS_DWORD error_code = ms_get_last_error(); assert(error_code != 0);
 		return;
 	}
 
 	MS_LARGE_INTEGER file_size = {0};
 	if (! ms_get_file_size_ex(id_file, & file_size)) {
-		ms_close_handle(id_file);
-		return;
+		ms_close_handle(id_file); return;
 	}
 	U8 desired_size = cast(U8, file_size.QuadPart);
 	uvar(Slice_Mem, buffer);
@@ -2413,12 +2365,9 @@ S_ void file_read_contents__u(U8 path_ptr, U8 path_len, U8 backing_proc, U8 back
 	U8 buffer_ptr = u8_r(u8_(buffer) + Slice_ptr)[0];
 	U8 buffer_len = u8_r(u8_(buffer) + Slice_len)[0];
 	if (buffer_ptr == 0 || buffer_len < file_size.QuadPart) {
-		ms_close_handle(id_file);
-		return;
+		ms_close_handle(id_file); return;
 	}
-	if (zero_backing) {
-		mem_zero(buffer_ptr, buffer_len);
-	}
+	if (zero_backing) { mem_zero(buffer_ptr, buffer_len); }
 
 	MS_DWORD amount_read = 0;
 	MS_BOOL  read_result = ms_read_file(
@@ -2429,28 +2378,21 @@ S_ void file_read_contents__u(U8 path_ptr, U8 path_len, U8 backing_proc, U8 back
 		null
 	);
 	ms_close_handle(id_file);
-	if (!read_result || amount_read != cast(MS_DWORD, desired_size)) {
-		return;
-	}
+	if (!read_result || amount_read != cast(MS_DWORD, desired_size)) { return; }
 	slice_assign_comp(result + FileOpInfo_content, buffer_ptr, desired_size);
 }
-
 I_ FileOpInfo file__read_contents(Str8 path, Opts_read_file_contents*R_ opts) {
 	assert(opts != nullptr);
 	assert(opts->backing.proc != nullptr);
-	FileOpInfo info = {0};
-	file_read_contents__u(path.ptr, path.len, u8_(opts->backing.proc), opts->backing.data, opts->zero_backing, u8_(& info));
+	FileOpInfo info = {0}; file_read_contents__u(path.ptr, path.len, u8_(opts->backing.proc), opts->backing.data, opts->zero_backing, u8_(& info));
 	return info;
 }
-
 S_ void file_write_str8__u(U8 path_ptr, U8 path_len, U8 content_ptr, U8 content_len) {
-	if (path_ptr == null || path_len == 0) {
-		assert(false && "Invalid path");
-		return;
+	if (path_ptr == null || path_len == 0) { 
+		assert(false && "Invalid path"); return;
 	}
-	if (content_ptr == null) {
-		assert(false && "Invalid content");
-		return;
+	if (content_ptr == null) { 
+		assert(false && "Invalid content"); return;
 	}
 
 	LP_ B1 scratch[FILE_PATH_SCRATCH_CAP] = {0};
@@ -2487,10 +2429,7 @@ S_ void file_write_str8__u(U8 path_ptr, U8 path_len, U8 content_ptr, U8 content_
 	assert(status != 0);
 	assert(bytes_written == content_len);
 }
-
-I_ void file_write_str8(Str8 path, Str8 content) {
-	file_write_str8__u(path.ptr, path.len, content.ptr, content.len);
-}
+I_ void file_write_str8(Str8 path, Str8 content) { file_write_str8__u(path.ptr, path.len, content.ptr, content.len); }
 #pragma endregion File System
 
 #pragma region Debug
@@ -2526,20 +2465,16 @@ int __cdecl __stdio_common_vfprintf_s(
 );
 void __cdecl __va_start(va_list* , ...);
 I_ int printf_err(char const* fmt, ...) {
-	int result;
-	va_list args;
-	va_start(args, fmt);
-	result = __stdio_common_vfprintf_s(MS_CRT_INTERNAL_LOCAL_PRINTF_OPTIONS, MS_stderr, fmt, nullptr, args);
+	va_list args; va_start(args, fmt);
+	int result = __stdio_common_vfprintf_s(MS_CRT_INTERNAL_LOCAL_PRINTF_OPTIONS, MS_stderr, fmt, nullptr, args);
 	va_end(args);
 	return result;
 }
 S_ inline void assert_handler( UTF8*R_ condition, UTF8*R_ file, UTF8*R_ function, S4 line, UTF8*R_ msg, ... ) {
 	printf_err( "%s - %s:(%d): Assert Failure: ", file, function, line );
-	if ( condition )
-		printf_err( "`%s` \n", condition );
+	if ( condition ) printf_err( "`%s` \n", condition );
 	if ( msg ) {
-		va_list va = {0};
-		va_start( va, msg );
+		va_list va = {0}; va_start( va, msg );
 		__stdio_common_vfprintf_s(MS_CRT_INTERNAL_LOCAL_PRINTF_OPTIONS, MS_stderr, msg, nullptr, va);
 		va_end( va );
 	}
@@ -2551,8 +2486,8 @@ S_ inline void assert_handler( UTF8*R_ condition, UTF8*R_ file, UTF8*R_ function
 #pragma region WATL
 S_ void watl_lex__u(U8 info, U8 source, U8 opts) {
 	if (info == null || source == null || opts == null) { return; }
-	U8 src_ptr = u8_r(source + Str8_ptr)[0];
-	U8 src_len = u8_r(source + Str8_len)[0];
+	U8 src_ptr = u8_r(source + Slice_ptr)[0];
+	U8 src_len = u8_r(source + Slice_len)[0];
 	if (src_len == 0) { return; }
 
 	U8 ainfo_msgs = opts + Opts_watl_lex_ainfo_msgs;
@@ -2583,45 +2518,42 @@ S_ void watl_lex__u(U8 info, U8 source, U8 opts) {
 		case WATL_Tok_Space:
 		case WATL_Tok_Tab: {
 			if (tok == 0 || prev_code != code) {
-				uvar(Slice_Mem, new_tok_slice);
-				watl_alloc_tok(u8_(new_tok_slice), toks_proc, toks_data);
+				uvar(Slice_Mem, new_tok_slice); watl_alloc_tok(u8_(new_tok_slice), toks_proc, toks_data);
 				U8 new_tok = u8_r(u8_(& new_tok_slice) + Slice_ptr)[0];
 				if (tok != 0 && new_tok != tok + size_of(WATL_Tok)) { goto slice_constraint_fail; }
 				tok = new_tok;
 				if (first_tok == 0) { first_tok = tok; }
-				u8_r(tok + Str8_ptr)[0] = cursor;
-				u8_r(tok + Str8_len)[0] = 0;
+				u8_r(tok + Slice_ptr)[0] = cursor;
+				u8_r(tok + Slice_len)[0] = 0;
 				was_formatting = true;
 				++ tok_count;
 			}
 			cursor += 1;
-			u8_r(tok + Str8_len)[0] += 1;
+			u8_r(tok + Slice_len)[0] += 1;
 		}
 		break;
 		case WATL_Tok_LineFeed: {
-			uvar(Slice_Mem, new_tok_slice);
-			watl_alloc_tok(u8_(new_tok_slice), toks_proc, toks_data);
+			uvar(Slice_Mem, new_tok_slice); watl_alloc_tok(u8_(new_tok_slice), toks_proc, toks_data);
 			U8 new_tok = u8_r(u8_(& new_tok_slice) + Slice_ptr)[0];
 			if (tok != 0 && new_tok != tok + size_of(WATL_Tok)) { goto slice_constraint_fail; }
 			tok = new_tok;
 			if (first_tok == 0) { first_tok = tok; }
-			u8_r(tok + Str8_ptr)[0] = cursor;
-			u8_r(tok + Str8_len)[0] = 1;
+			u8_r(tok + Slice_ptr)[0] = cursor;
+			u8_r(tok + Slice_len)[0] = 1;
 			cursor += 1;
 			was_formatting = true;
 			++ tok_count;
 		}
 		break;
 		case WATL_Tok_CarriageReturn: {
-			uvar(Slice_Mem, new_tok_slice);
-			watl_alloc_tok(u8_(new_tok_slice), toks_proc, toks_data);
+			uvar(Slice_Mem, new_tok_slice); watl_alloc_tok(u8_(new_tok_slice), toks_proc, toks_data);
 			U8 new_tok = u8_r(u8_(& new_tok_slice) + Slice_ptr)[0];
 			if (tok != 0 && new_tok != tok + size_of(WATL_Tok)) { goto slice_constraint_fail; }
 			tok = new_tok;
 			if (first_tok == 0) { first_tok = tok; }
 			U8 advance = ((cursor + 1) < end && u1_r(cursor + 1)[0] == WATL_Tok_LineFeed) ? 2 : 1;
-			u8_r(tok + Str8_ptr)[0] = cursor;
-			u8_r(tok + Str8_len)[0] = advance;
+			u8_r(tok + Slice_ptr)[0] = cursor;
+			u8_r(tok + Slice_len)[0] = advance;
 			cursor += advance;
 			was_formatting = true;
 			++ tok_count;
@@ -2629,19 +2561,18 @@ S_ void watl_lex__u(U8 info, U8 source, U8 opts) {
 		break;
 		default: {
 			if (was_formatting || tok == 0) {
-				uvar(Slice_Mem, new_tok_slice);
-				watl_alloc_tok(u8_(new_tok_slice), toks_proc, toks_data);
+				uvar(Slice_Mem, new_tok_slice); watl_alloc_tok(u8_(new_tok_slice), toks_proc, toks_data);
 				U8 new_tok = u8_r(u8_(& new_tok_slice) + Slice_ptr)[0];
 				if (tok != 0 && new_tok != tok + size_of(WATL_Tok)) { goto slice_constraint_fail; }
 				tok = new_tok;
 				if (first_tok == 0) { first_tok = tok; }
-				u8_r(tok + Str8_ptr)[0] = cursor;
-				u8_r(tok + Str8_len)[0] = 0;
+				u8_r(tok + Slice_ptr)[0] = cursor;
+				u8_r(tok + Slice_len)[0] = 0;
 				was_formatting = false;
 				++ tok_count;
 			}
 			cursor += 1;
-			u8_r(tok + Str8_len)[0] += 1;
+			u8_r(tok + Slice_len)[0] += 1;
 		}
 		break;
 		}
@@ -2654,13 +2585,12 @@ S_ void watl_lex__u(U8 info, U8 source, U8 opts) {
 
 slice_constraint_fail: {
 	u4_r(info + WATL_LexInfo_signal)[0] |= WATL_LexStatus_MemFail_SliceConstraintFail;
-	uvar(Slice_Mem, msg_slice);
-	watl_alloc_lex_msg(u8_(msg_slice), msgs_proc, msgs_data);
+	uvar(Slice_Mem, msg_slice); watl_alloc_lex_msg(u8_(msg_slice), msgs_proc, msgs_data);
 	U8 msg = u8_r(u8_(& msg_slice) + Slice_ptr)[0];
 	u8_r(msg + WATL_LexMsg_next)[0] = 0;
 	Str8 msg_content = lit("Token slice allocation was not contiguous");
-	u8_r(msg + WATL_LexMsg_content + Str8_ptr)[0] = msg_content.ptr;
-	u8_r(msg + WATL_LexMsg_content + Str8_len)[0] = msg_content.len;
+	u8_r(msg + WATL_LexMsg_content + Slice_ptr)[0] = msg_content.ptr;
+	u8_r(msg + WATL_LexMsg_content + Slice_len)[0] = msg_content.len;
 	u8_r(msg + WATL_LexMsg_tok)[0] = tok;
 	u4_r(msg + WATL_LexMsg_pos + WATL_Pos_line)[0]   = cast(U4, -1);
 	u4_r(msg + WATL_LexMsg_pos + WATL_Pos_column)[0] = cast(U4, -1);
@@ -2706,40 +2636,34 @@ S_ void watl_parse__u(U8 info, U8 tokens_slice, U8 opts) {
 	U8 nodes_proc = u8_r(ainfo_nodes + AllocatorInfo_proc)[0];
 	U8 nodes_data = u8_r(ainfo_nodes + AllocatorInfo_data)[0];
 	U1 fail_slice = u1_r(opts + Opts_watl_parse_failon_slice_constraint_fail)[0];
-
 	u8_r(info + WATL_ParseInfo_lines + Slice_ptr)[0] = 0;
 	u8_r(info + WATL_ParseInfo_lines + Slice_len)[0] = 0;
-	u8_r(info + WATL_ParseInfo_msgs)[0] = 0;
-	u4_r(info + WATL_ParseInfo_signal)[0] = 0;
+	u8_r(info + WATL_ParseInfo_msgs             )[0] = 0;
+	u4_r(info + WATL_ParseInfo_signal           )[0] = 0;
 
 	U8 msg_last = 0;
-	uvar(Slice_Mem, line_slice);
-	watl_alloc_line(u8_(line_slice), lines_proc, lines_data);
+	uvar(Slice_Mem, line_slice); watl_alloc_line(u8_(line_slice), lines_proc, lines_data);
 	U8 line = u8_r(u8_(& line_slice) + Slice_ptr)[0];
-	uvar(Slice_Mem, node_slice);
-	watl_alloc_node(u8_(node_slice), nodes_proc, nodes_data);
+	uvar(Slice_Mem, node_slice); watl_alloc_node(u8_(node_slice), nodes_proc, nodes_data);
 	U8 curr = u8_r(u8_(& node_slice) + Slice_ptr)[0];
-	u8_r(line + Slice_ptr)[0] = curr;
-	u8_r(line + Slice_len)[0] = 0;
+	u8_r(line + Slice_ptr                       )[0] = curr;
+	u8_r(line + Slice_len                       )[0] = 0;
 	u8_r(info + WATL_ParseInfo_lines + Slice_ptr)[0] = line;
 	u8_r(info + WATL_ParseInfo_lines + Slice_len)[0] = 0;
 
 	U8 token = 0;
 	for (U8 idx = 0; idx < toks_len; ++idx) {
 		token = toks_ptr + idx * size_of(WATL_Tok);
-		U8 token_ptr = u8_r(token + Str8_ptr)[0];
+		U8 token_ptr  = u8_r(token + Slice_ptr)[0];
 		U1 first_char = token_ptr ? u1_r(token_ptr)[0] : 0;
-
 		switch (first_char) {
 		case WATL_Tok_CarriageReturn:
 		case WATL_Tok_LineFeed: {
-			uvar(Slice_Mem, new_line_slice);
-			watl_alloc_line(u8_(new_line_slice), lines_proc, lines_data);
-			U8 new_line = u8_r(u8_(& new_line_slice) + Slice_ptr)[0];
+			uvar(Slice_Mem, new_line_slice); watl_alloc_line(u8_(new_line_slice), lines_proc, lines_data);
+			U8  new_line = u8_r(u8_(& new_line_slice) + Slice_ptr)[0];
 			if (new_line != line + size_of(WATL_Line)) { goto line_slice_fail; }
 			line = new_line;
-			uvar(Slice_Mem, new_node_slice);
-			watl_alloc_node(u8_(new_node_slice), nodes_proc, nodes_data);
+			uvar(Slice_Mem, new_node_slice); watl_alloc_node(u8_(new_node_slice), nodes_proc, nodes_data);
 			U8 new_node = u8_r(u8_(& new_node_slice) + Slice_ptr)[0];
 			curr = new_node;
 			u8_r(line + Slice_ptr)[0] = curr;
@@ -2749,61 +2673,47 @@ S_ void watl_parse__u(U8 info, U8 tokens_slice, U8 opts) {
 		}
 		default: break;
 		}
-
-		uvar(Str8, cached) = {0};
-		cache_str8__u(u8_(& cached), str_cache, token);
-		u8_r(curr + Str8_ptr)[0] = u8_r(u8_(& cached) + Str8_ptr)[0];
-		u8_r(curr + Str8_len)[0] = u8_r(u8_(& cached) + Str8_len)[0];
-		uvar(Slice_Mem, new_node_slice);
-		watl_alloc_node(u8_(new_node_slice), nodes_proc, nodes_data);
-		U8 new_node = u8_r(u8_(& new_node_slice) + Slice_ptr)[0];
+		uvar(Str8, cached) = {0}; cache_str8__u(u8_(& cached), str_cache, token);
+		u8_r(curr + Slice_ptr)[0] = u8_r(u8_(& cached) + Slice_ptr)[0];
+		u8_r(curr + Slice_len)[0] = u8_r(u8_(& cached) + Slice_len)[0];
+		uvar(Slice_Mem, new_node_slice); watl_alloc_node(u8_(new_node_slice), nodes_proc, nodes_data);
+		U8  new_node = u8_r(u8_(& new_node_slice) + Slice_ptr)[0];
 		if (new_node != curr + size_of(WATL_Node)) { goto node_slice_fail; }
-		curr = new_node;
-		u8_r(line + Slice_len)[0] += 1;
+		curr = new_node; u8_r(line + Slice_len)[0] += 1;
 	}
 	return;
 	line_slice_fail: {
 		u4_r(info + WATL_ParseInfo_signal)[0] |= WATL_ParseStatus_MemFail_SliceConstraintFail;
-		uvar(Slice_Mem, msg_slice);
-		watl_alloc_parse_msg(u8_(msg_slice), msgs_proc, msgs_data);
-		U8 msg = u8_r(u8_(& msg_slice) + Slice_ptr)[0];
+		uvar(Slice_Mem, msg_slice); watl_alloc_parse_msg(u8_(msg_slice), msgs_proc, msgs_data);
+		U8   msg     = u8_r(u8_(& msg_slice) + Slice_ptr)[0];
 		Str8 content = lit("Line slice allocation was not contiguous");
-		u8_r(msg + WATL_ParseMsg_content + Str8_ptr)[0] = content.ptr;
-		u8_r(msg + WATL_ParseMsg_content + Str8_len)[0] = content.len;
-		u8_r(msg + WATL_ParseMsg_line)[0] = line;
-		u8_r(msg + WATL_ParseMsg_tok)[0] = token;
-		u4_r(msg + WATL_ParseMsg_pos + WATL_Pos_line)[0]   = cast(U4, u8_r(info + WATL_ParseInfo_lines + Slice_len)[0]);
+		u8_r(msg + WATL_ParseMsg_content + Slice_ptr  )[0] = content.ptr;
+		u8_r(msg + WATL_ParseMsg_content + Slice_len  )[0] = content.len;
+		u8_r(msg + WATL_ParseMsg_line                 )[0] = line;
+		u8_r(msg + WATL_ParseMsg_tok                  )[0] = token;
+		u4_r(msg + WATL_ParseMsg_pos + WATL_Pos_line  )[0] = cast(U4, u8_r(info + WATL_ParseInfo_lines + Slice_len)[0]);
 		u4_r(msg + WATL_ParseMsg_pos + WATL_Pos_column)[0] = cast(U4, u8_r(line + Slice_len)[0]);
-		u8_r(msg + WATL_ParseMsg_next)[0] = 0;
-		if (u8_r(info + WATL_ParseInfo_msgs)[0] == 0) {
-			u8_r(info + WATL_ParseInfo_msgs)[0] = msg;
-		} else {
-			u8_r(msg_last + WATL_ParseMsg_next)[0] = msg;
-		}
-		msg_last = msg;
-		assert(fail_slice == false);
+		u8_r(msg + WATL_ParseMsg_next                 )[0] = 0;
+		if (u8_r(info + WATL_ParseInfo_msgs)[0] == 0) { u8_r(info     + WATL_ParseInfo_msgs)[0] = msg; } 
+		else                                          { u8_r(msg_last + WATL_ParseMsg_next )[0] = msg; }
+		msg_last = msg; assert(fail_slice == false);
 		return;
 	}
 	node_slice_fail: {
 		u4_r(info + WATL_ParseInfo_signal)[0] |= WATL_ParseStatus_MemFail_SliceConstraintFail;
-		uvar(Slice_Mem, msg_slice);
-		watl_alloc_parse_msg(u8_(msg_slice), msgs_proc, msgs_data);
-		U8 msg = u8_r(u8_(& msg_slice) + Slice_ptr)[0];
+		uvar(Slice_Mem, msg_slice); watl_alloc_parse_msg(u8_(msg_slice), msgs_proc, msgs_data);
+		U8   msg     = u8_r(u8_(& msg_slice) + Slice_ptr)[0];
 		Str8 content = lit("Nodes slice allocation was not contiguous");
-		u8_r(msg + WATL_ParseMsg_content + Str8_ptr)[0] = content.ptr;
-		u8_r(msg + WATL_ParseMsg_content + Str8_len)[0] = content.len;
-		u8_r(msg + WATL_ParseMsg_line)[0] = line;
-		u8_r(msg + WATL_ParseMsg_tok)[0] = token;
-		u4_r(msg + WATL_ParseMsg_pos + WATL_Pos_line)[0]   = cast(U4, u8_r(info + WATL_ParseInfo_lines + Slice_len)[0]);
+		u8_r(msg + WATL_ParseMsg_content + Slice_ptr  )[0] = content.ptr;
+		u8_r(msg + WATL_ParseMsg_content + Slice_len  )[0] = content.len;
+		u8_r(msg + WATL_ParseMsg_line                 )[0] = line;
+		u8_r(msg + WATL_ParseMsg_tok                  )[0] = token;
+		u4_r(msg + WATL_ParseMsg_pos + WATL_Pos_line  )[0] = cast(U4, u8_r(info + WATL_ParseInfo_lines + Slice_len)[0]);
 		u4_r(msg + WATL_ParseMsg_pos + WATL_Pos_column)[0] = cast(U4, u8_r(line + Slice_len)[0]);
-		u8_r(msg + WATL_ParseMsg_next)[0] = 0;
-		if (u8_r(info + WATL_ParseInfo_msgs)[0] == 0) {
-			u8_r(info + WATL_ParseInfo_msgs)[0] = msg;
-		} else {
-			u8_r(msg_last + WATL_ParseMsg_next)[0] = msg;
-		}
-		msg_last = msg;
-		assert(fail_slice == false);
+		u8_r(msg + WATL_ParseMsg_next                 )[0] = 0;
+		if (u8_r(info + WATL_ParseInfo_msgs)[0] == 0) { u8_r(info     + WATL_ParseInfo_msgs)[0] = msg; }
+		else                                          { u8_r(msg_last + WATL_ParseMsg_next )[0] = msg; }
+		msg_last = msg; assert(fail_slice == false);
 		return;
 	}
 }
@@ -2813,20 +2723,16 @@ I_ void api_watl_parse(WATL_ParseInfo_R info, Slice_WATL_Tok tokens, Opts_watl_p
 	watl_parse__u(u8_(info), u8_(& tokens), u8_(opts));
 }
 I_ WATL_ParseInfo watl__parse(Slice_WATL_Tok tokens, Opts_watl_parse*R_ opts) {
-	WATL_ParseInfo info = {0};
-	api_watl_parse(& info, tokens, opts);
-	return info;
+	WATL_ParseInfo info = {0}; api_watl_parse(& info, tokens, opts); return info;
 }
 S_ void watl_dump_listing__u(U8 result, U8 buffer_ainfo, U8 lines) {
 	if (result == null || buffer_ainfo == null) { return; }
-	U8 buf_proc = u8_r(buffer_ainfo + AllocatorInfo_proc)[0];
-	assert(buf_proc != null);
+	U8 buf_proc = u8_r(buffer_ainfo + AllocatorInfo_proc)[0]; assert(buf_proc != null);
 
-	uvar(Str8Gen, gen) = {0};
-	U8 gen_addr = u8_(gen);
+	uvar(Str8Gen, gen) = {0}; U8 gen_addr = u8_(gen);
 	str8gen_init__u(gen_addr, buffer_ainfo);
 
-	LP_ B1 scratch[kilo(64)];
+	LP_ B1 scratch  [kilo(64)];
 	LP_ B1 arena_mem[size_of(FArena)];
 	farena_init__u(u8_(arena_mem), u8_(scratch), size_of(scratch));
 	U8 sarena     = u8_(arena_mem);
@@ -2837,18 +2743,19 @@ S_ void watl_dump_listing__u(U8 result, U8 buffer_ainfo, U8 lines) {
 	U8 lines_len = u8_r(lines + Slice_len)[0];
 	U4 line_num  = 0;
 
-	Str8 header_fmt = lit("Line <line_num> - Chunks <chunk_num>:\n");
-	Str8 chunk_fmt  = lit("\t<id>(<size>): '<chunk>'\n");
-	Str8 lit_visible = lit("Visible");
-	Str8 lit_space   = lit("Space");
-	Str8 lit_tab     = lit("Tab");
+	Str8 header_fmt    = lit("Line <line_num> - Chunks <chunk_num>:\n");
+	Str8 chunk_fmt     = lit("\t<id>(<size>): '<chunk>'\n");
+	Str8 lit_visible   = lit("Visible");
+	Str8 lit_space     = lit("Space");
+	Str8 lit_tab       = lit("Tab");
 	Str8 key_line_num  = lit("line_num");
 	Str8 key_chunk_num = lit("chunk_num");
 	Str8 key_id        = lit("id");
 	Str8 key_size      = lit("size");
 	Str8 key_chunk     = lit("chunk");
 
-	for (U8 idx = 0; idx < lines_len; ++idx) {
+	for (U8 idx = 0; idx < lines_len; ++idx) 
+	{
 		line_num += 1;
 		U8 line_addr  = lines_ptr + idx * size_of(WATL_Line);
 		U8 chunks_ptr = u8_r(line_addr + Slice_ptr)[0];
@@ -2880,8 +2787,8 @@ S_ void watl_dump_listing__u(U8 result, U8 buffer_ainfo, U8 lines) {
 
 		for (U8 chunk_idx = 0; chunk_idx < chunks_len; ++chunk_idx) {
 			U8 chunk_addr = chunks_ptr + chunk_idx * size_of(WATL_Node);
-			U8 chunk_ptr  = u8_r(chunk_addr + Str8_ptr)[0];
-			U8 chunk_len  = u8_r(chunk_addr + Str8_len)[0];
+			U8 chunk_ptr  = u8_r(chunk_addr + Slice_ptr)[0];
+			U8 chunk_len  = u8_r(chunk_addr + Slice_len)[0];
 			U8 id_addr    = u8_(& lit_visible);
 			if (chunk_ptr != 0) {
 				U1 ch = u1_r(chunk_ptr)[0];
@@ -2895,8 +2802,8 @@ S_ void watl_dump_listing__u(U8 result, U8 buffer_ainfo, U8 lines) {
 
 			uvar(Str8, chunk_str) = {0};
 			U8 chunk_str_addr = u8_(chunk_str);
-			u8_r(chunk_str_addr + Str8_ptr)[0] = chunk_ptr;
-			u8_r(chunk_str_addr + Str8_len)[0] = chunk_len;
+			u8_r(chunk_str_addr + Slice_ptr)[0] = chunk_ptr;
+			u8_r(chunk_str_addr + Slice_len)[0] = chunk_len;
 
 			LP_ B1 chunk_entries_mem[3 * size_of(A2_Str8)] = {0};
 			U8 chunk_entries = u8_(chunk_entries_mem);
@@ -2920,9 +2827,8 @@ S_ void watl_dump_listing__u(U8 result, U8 buffer_ainfo, U8 lines) {
 
 		farena_reset__u(sarena);
 	}
-
-	u8_r(result + Str8_ptr)[0] = u8_r(gen_addr + Str8Gen_ptr)[0];
-	u8_r(result + Str8_len)[0] = u8_r(gen_addr + Str8Gen_len)[0];
+	u8_r(result + Slice_ptr)[0] = u8_r(gen_addr + Str8Gen_ptr)[0];
+	u8_r(result + Slice_len)[0] = u8_r(gen_addr + Str8Gen_len)[0];
 }
 I_ Str8 watl_dump_listing(AllocatorInfo buffer, Slice_WATL_Line lines) {
 	Str8 out = {0};

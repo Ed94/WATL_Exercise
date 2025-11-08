@@ -278,7 +278,6 @@ void slice__copy(Slice_B1 dest, U8 dest_typewidth, Slice_B1 src, U8 src_typewidt
 	iter.cursor op iter.r.end;        \
 	++ iter.cursor                    \
 )
-
 #define def_span(type)                                                \
 	        def_struct(tmpl(     Span,type)) { type begin; type end; }; \
 	typedef def_struct(tmpl(Iter_Span,type)) { tmpl(Span,type) r; type cursor; }
